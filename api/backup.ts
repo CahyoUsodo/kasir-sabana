@@ -42,9 +42,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+    const fileId = process.env.GOOGLE_DRIVE_FILE_ID;
 
-    if (!clientEmail || !privateKey || !folderId) {
-      return res.status(500).json({ error: 'Server missing Google Drive credentials' });
+    if (!clientEmail || !privateKey || (!folderId && !fileId)) {
+      return res.status(500).json({ error: 'Server missing Google Drive credentials (Folder or File ID)' });
     }
 
     // Initialize Auth
@@ -57,6 +58,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     const drive = google.drive({ version: 'v3', auth });
+    
+    const media = {
+      mimeType: 'application/json',
+      body: JSON.stringify(backupData, null, 2),
+    };
+
+    let result;
+
+    // Jika menggunakan FILE_ID (Bypass masalah Service Account Quota)
+    if (fileId) {
+      result = await drive.files.update({
+        fileId: fileId,
+        media: media,
+      });
+      return res.status(200).json({ success: true, fileId: result.data.id });
+    }
 
     // File name
     // Replace invalid characters from storeName to make it a safe filename
@@ -80,12 +97,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ...(existingFile ? {} : { parents: [folderId] }) // Only set parents for new files
     };
 
-    const media = {
-      mimeType: 'application/json',
-      body: JSON.stringify(backupData, null, 2),
-    };
-
-    let result;
     if (existingFile && existingFile.id) {
       // Overwrite existing file
       result = await drive.files.update({
