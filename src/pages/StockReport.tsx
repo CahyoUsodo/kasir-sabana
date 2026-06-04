@@ -1,8 +1,10 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { useState } from 'react';
-import { Package, ArrowDownToLine, ArrowUpFromLine, TrendingUp, AlertTriangle, Warehouse, BarChart3 } from 'lucide-react';
+import { Package, ArrowDownToLine, ArrowUpFromLine, TrendingUp, AlertTriangle, Warehouse, BarChart3, ChevronLeft } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Link } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { format, subDays, startOfDay } from 'date-fns';
@@ -90,10 +92,15 @@ export default function StockReport() {
 
   return (
     <div className="px-4 pt-6 pb-20 space-y-5">
-      <h1 className="text-xl font-bold flex items-center gap-2">
-        <Warehouse className="w-5 h-5 text-primary" />
-        Laporan Stok
-      </h1>
+      <div className="flex items-center gap-2">
+        <Link to="/settings">
+          <Button variant="ghost" size="icon" className="h-8 w-8"><ChevronLeft className="w-4 h-4" /></Button>
+        </Link>
+        <h1 className="text-xl font-bold flex items-center gap-2">
+          <Warehouse className="w-5 h-5 text-primary" />
+          Laporan Stok
+        </h1>
+      </div>
 
       <Tabs value={period} onValueChange={v => setPeriod(v as '7' | '30')}>
         <TabsList className="w-full">

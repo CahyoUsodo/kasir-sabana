@@ -363,22 +363,7 @@ export default function Produk() {
                 </Select>
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>Barcode</Label>
-              <div className="flex gap-2">
-                <Input value={barcode} onChange={e => setBarcode(e.target.value)} placeholder="Opsional" className="h-11 flex-1" />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-11 w-11 shrink-0"
-                  title="Salin dari SKU"
-                  onClick={() => setBarcode(sku.trim())}
-                >
-                  <Copy className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
+
             <div className="space-y-1.5">
               <Label>Deskripsi</Label>
               <Textarea

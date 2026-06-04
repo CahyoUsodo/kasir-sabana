@@ -112,14 +112,6 @@ export default function StockInPage() {
         </Button>
       </div>
 
-      <Select value={filterSupplier} onValueChange={setFilterSupplier}>
-        <SelectTrigger className="h-10"><SelectValue placeholder="Filter Supplier" /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">Semua Supplier</SelectItem>
-          {suppliers?.map(s => <SelectItem key={s.id} value={s.id!.toString()}>{s.name}</SelectItem>)}
-        </SelectContent>
-      </Select>
-
       <p className="text-xs text-muted-foreground">{filtered.length} catatan</p>
 
       {filtered.length === 0 ? (
@@ -135,7 +127,6 @@ export default function StockInPage() {
                 <div className="flex items-start justify-between">
                   <div>
                     <h3 className="text-sm font-semibold">{getProductName(si.productId)}</h3>
-                    <p className="text-xs text-muted-foreground">dari {getSupplierName(si.supplierId)}</p>
                     <div className="flex items-center gap-3 mt-1.5">
                       <span className="text-xs font-medium bg-success/10 text-success px-2 py-0.5 rounded">+{si.quantity}</span>
                       <span className="text-xs text-muted-foreground">@ Rp {si.buyPrice.toLocaleString('id-ID')}</span>

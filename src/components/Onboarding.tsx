@@ -321,39 +321,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                 />
               </div>
 
-              {/* Dummy data toggle */}
-              <div className="flex items-center justify-between p-3 rounded-xl bg-muted/50 border border-border">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-accent/10 text-accent flex items-center justify-center">
-                    <Database className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Muat data contoh</p>
-                    <p className="text-[10px] text-muted-foreground">11 produk, 2 supplier, 3 transaksi demo</p>
-                  </div>
-                </div>
-                <Switch checked={loadDummy} onCheckedChange={setLoadDummy} />
-              </div>
 
-              {/* Theme color picker */}
-              <div className="space-y-2.5 p-3 rounded-xl bg-muted/50 border border-border">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
-                    <Palette className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Warna Tema</p>
-                    <p className="text-[10px] text-muted-foreground">Pilih warna utama aplikasi</p>
-                  </div>
-                </div>
-                <ThemeColorPicker
-                  value={themeColor}
-                  onChange={hue => {
-                    setThemeColorState(hue);
-                    applyThemeColor(hue);
-                  }}
-                />
-              </div>
             </div>
           </div>
         )}
