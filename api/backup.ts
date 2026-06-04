@@ -24,9 +24,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Missing storeName or backupData' });
     }
 
-    const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
-    // Replace literal '\n' string with actual newline if needed
+    let clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
     let privateKey = process.env.GOOGLE_PRIVATE_KEY || '';
+
+    if (process.env.GOOGLE_DRIVE_CREDENTIALS) {
+      try {
+        const creds = JSON.parse(process.env.GOOGLE_DRIVE_CREDENTIALS);
+        if (creds.client_email) clientEmail = creds.client_email;
+        if (creds.private_key) privateKey = creds.private_key;
+      } catch (e) {
+        console.error('Failed to parse GOOGLE_DRIVE_CREDENTIALS', e);
+      }
+    }
+
     if (privateKey.includes('\\n')) {
       privateKey = privateKey.replace(/\\n/g, '\n');
     }
