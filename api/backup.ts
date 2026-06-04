@@ -42,7 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
-    const fileId = process.env.GOOGLE_DRIVE_FILE_ID;
+    const fileId = req.body.fileId || process.env.GOOGLE_DRIVE_FILE_ID;
 
     if (!clientEmail || !privateKey || (!folderId && !fileId)) {
       return res.status(500).json({ error: 'Server missing Google Drive credentials (Folder or File ID)' });

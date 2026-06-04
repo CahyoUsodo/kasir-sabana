@@ -177,6 +177,7 @@ export interface StoreSettings {
   logo?: string; // base64 JPEG compressed via compressImage()
   deviceId: string;
   multiUserEnabled?: boolean; // CR-multiuser: opt-in flag
+  googleDriveFileId?: string; // CR-multi-branch: specific file ID for this branch
 }
 
 // === Database ===

@@ -632,24 +632,40 @@ export default function Pengaturan() {
         <CardHeader className="pb-2">
           <CardTitle className="text-sm flex items-center gap-1.5"><Download className="w-4 h-4" /> Backup & Restore</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2">
-          <Button variant="outline" className="w-full h-10 text-sm gap-2" onClick={exportBackupData}>
-            <Download className="w-4 h-4" /> Export Backup (Manual)
-          </Button>
-          <Button variant="outline" className="w-full h-10 text-sm gap-2" onClick={handleImport}>
-            <Upload className="w-4 h-4" /> Import / Restore Data
-          </Button>
-          <Button 
-            variant="default" 
-            className="w-full h-10 text-sm gap-2" 
-            onClick={handleManualBackup}
-            disabled={isBackingUp}
-          >
-            <CloudUpload className="w-4 h-4" /> {isBackingUp ? 'Menyimpan...' : 'Backup ke Google Drive Sekarang'}
-          </Button>
-          {storeSettings?.lastBackupAt && (
-            <p className="text-[10px] text-muted-foreground text-center">Terakhir backup: {new Date(storeSettings.lastBackupAt).toLocaleString('id-ID')}</p>
-          )}
+        <CardContent className="space-y-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Google Drive File ID (Bypass Error Service Account & Multi-Cabang)</Label>
+            <Input 
+              value={storeSettings?.googleDriveFileId || ''} 
+              onChange={async (e) => {
+                if (storeSettings?.id) {
+                  await db.storeSettings.update(storeSettings.id, { googleDriveFileId: e.target.value.trim() });
+                }
+              }}
+              placeholder="Masukkan ID File Docs (opsional)" 
+              className="h-9 text-xs"
+            />
+            <p className="text-[10px] text-muted-foreground leading-tight">Jika diisi, backup akan menimpa file ini. Sangat berguna jika Anda memiliki beberapa cabang agar backup tidak saling tertimpa (tiap cabang beda ID File).</p>
+          </div>
+          <div className="space-y-2">
+            <Button variant="outline" className="w-full h-10 text-sm gap-2" onClick={exportBackupData}>
+              <Download className="w-4 h-4" /> Export Backup (Manual)
+            </Button>
+            <Button variant="outline" className="w-full h-10 text-sm gap-2" onClick={handleImport}>
+              <Upload className="w-4 h-4" /> Import / Restore Data
+            </Button>
+            <Button 
+              variant="default" 
+              className="w-full h-10 text-sm gap-2" 
+              onClick={handleManualBackup}
+              disabled={isBackingUp}
+            >
+              <CloudUpload className="w-4 h-4" /> {isBackingUp ? 'Menyimpan...' : 'Backup ke Google Drive Sekarang'}
+            </Button>
+            {storeSettings?.lastBackupAt && (
+              <p className="text-[10px] text-muted-foreground text-center">Terakhir backup: {new Date(storeSettings.lastBackupAt).toLocaleString('id-ID')}</p>
+            )}
+          </div>
         </CardContent>
       </Card>
       )}

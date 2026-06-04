@@ -28,14 +28,20 @@ export async function performBackup(): Promise<boolean> {
 
   const storeName = settings.storeName || 'Toko_Saya';
 
-  const response = await fetch('/api/backup', {
+  // Jika aplikasi berjalan di Android (Capacitor), kita harus menembak URL Vercel langsung
+  // karena '/api/backup' hanya ada di server Vercel.
+  const isCapacitor = window.location.origin.includes('localhost') || window.location.protocol === 'capacitor:';
+  const apiUrl = isCapacitor ? 'https://kasir-sabana-5bf1.vercel.app/api/backup' : '/api/backup';
+
+  const response = await fetch(apiUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       storeName,
-      backupData: allData
+      backupData: allData,
+      fileId: settings.googleDriveFileId
     })
   });
 
@@ -45,7 +51,8 @@ export async function performBackup(): Promise<boolean> {
       const errData = await response.json();
       if (errData.error) errorMessage = errData.error;
     } catch (e) {
-      // Ignore JSON parse error
+      // Jika response gagal di-parse sebagai JSON (misal karena URL salah/404)
+      errorMessage = `Error ${response.status}: ${response.statusText}. Gagal terhubung ke Vercel.`;
     }
     throw new Error(errorMessage);
   }
