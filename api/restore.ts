@@ -57,10 +57,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const drive = google.drive({ version: 'v3', auth });
 
     // Download file content
-    const response = await drive.files.get(
-      { fileId, alt: 'media' },
-      { responseType: 'text' }
-    );
+    let response;
+    try {
+      response = await drive.files.get(
+        { fileId, alt: 'media' },
+        { responseType: 'text' }
+      );
+    } catch (getFileError: any) {
+      if (getFileError.message && getFileError.message.includes('Use Export with Docs Editors files')) {
+        response = await drive.files.export(
+          { fileId, mimeType: 'text/plain' },
+          { responseType: 'text' }
+        );
+      } else {
+        throw getFileError;
+      }
+    }
 
     const backupData = typeof response.data === 'string' 
       ? JSON.parse(response.data) 
