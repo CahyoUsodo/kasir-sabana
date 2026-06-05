@@ -74,9 +74,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const backupData = typeof response.data === 'string' 
-      ? JSON.parse(response.data) 
-      : response.data;
+    let backupData;
+    if (typeof response.data === 'string') {
+      let rawString = response.data.trim();
+      // Remove BOM if present
+      if (rawString.charCodeAt(0) === 0xFEFF) {
+        rawString = rawString.slice(1);
+      }
+      try {
+        backupData = JSON.parse(rawString);
+      } catch (parseError: any) {
+        return res.status(400).json({ error: 'File berhasil diunduh, tetapi isinya BUKAN format teks JSON backup yang valid. Pastikan Anda menyalin isi JSON dengan benar ke dalam Google Docs.' });
+      }
+    } else {
+      backupData = response.data;
+    }
 
     if (!backupData || !backupData.version) {
       return res.status(400).json({ error: 'File bukan backup yang valid (tidak ada field version)' });
