@@ -477,6 +477,17 @@ export default function Laporan() {
       cell.style = headerStyle;
     });
 
+    // Pre-compute transaction-level discount distribution
+    // Discounts applied to the whole cart aren't in item.discountAmount,
+    // so we distribute them proportionally across items by subtotal share.
+    const txDiscountInfo: Record<number, { extraDiscount: number; itemSubtotalSum: number }> = {};
+    transactions.forEach(t => {
+      const txItems = allItems.filter(item => item.transactionId === t.id);
+      const itemDiscountSum = txItems.reduce((s, item) => s + item.discountAmount, 0);
+      const itemSubtotalSum = txItems.reduce((s, item) => s + item.subtotal, 0);
+      if (t.id) txDiscountInfo[t.id] = { extraDiscount: t.discountAmount - itemDiscountSum, itemSubtotalSum };
+    });
+
     // Build per-product aggregation
     const prodAgg: Record<string, {
       name: string; qty: number; revenue: number;
@@ -485,10 +496,12 @@ export default function Laporan() {
     allItems.forEach(item => {
       const key = item.productName;
       if (!prodAgg[key]) prodAgg[key] = { name: key, qty: 0, revenue: 0, hpp: 0, profit: 0, productId: item.productId };
+      const info = txDiscountInfo[item.transactionId] || { extraDiscount: 0, itemSubtotalSum: 1 };
+      const discShare = info.itemSubtotalSum > 0 ? (item.subtotal / info.itemSubtotalSum) * info.extraDiscount : 0;
       prodAgg[key].qty += item.quantity;
       prodAgg[key].revenue += item.subtotal;
       prodAgg[key].hpp += item.hpp * item.quantity;
-      prodAgg[key].profit += (item.price - item.hpp) * item.quantity - item.discountAmount;
+      prodAgg[key].profit += item.subtotal - (item.hpp * item.quantity) - discShare;
     });
 
     const prodSorted = Object.values(prodAgg).sort((a, b) => b.revenue - a.revenue);
@@ -538,15 +551,17 @@ export default function Laporan() {
       if (!dailyAgg[dateKey]) dailyAgg[dateKey] = {};
 
       const txItems = allItems.filter(item => item.transactionId === t.id);
+      const info = txDiscountInfo[t.id!] || { extraDiscount: 0, itemSubtotalSum: 1 };
       txItems.forEach(item => {
         const key = item.productName;
         if (!dailyAgg[dateKey][key]) {
           dailyAgg[dateKey][key] = { name: key, qty: 0, revenue: 0, hpp: 0, profit: 0, productId: item.productId };
         }
+        const discShare = info.itemSubtotalSum > 0 ? (item.subtotal / info.itemSubtotalSum) * info.extraDiscount : 0;
         dailyAgg[dateKey][key].qty += item.quantity;
         dailyAgg[dateKey][key].revenue += item.subtotal;
         dailyAgg[dateKey][key].hpp += item.hpp * item.quantity;
-        dailyAgg[dateKey][key].profit += (item.price - item.hpp) * item.quantity - item.discountAmount;
+        dailyAgg[dateKey][key].profit += item.subtotal - (item.hpp * item.quantity) - discShare;
       });
     });
 
