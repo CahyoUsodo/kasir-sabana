@@ -33,7 +33,7 @@ export default function AppLayout() {
 
   return (
     <div className="min-h-[100dvh] bg-background max-w-lg md:max-w-6xl mx-auto relative pt-[env(safe-area-inset-top)]">
-      <main className="pb-[calc(5rem+env(safe-area-inset-bottom,0px))]">
+      <main className="pb-20">
         <Outlet />
       </main>
       <BottomNav />
