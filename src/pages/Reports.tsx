@@ -180,6 +180,8 @@ export default function Laporan() {
     const currencyFormat = 'Rp #,##0';
     // Percentage format
     const percentFormat = '0.0%';
+    // Subtotal Fill
+    const subtotalFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFF9E5E5' } };
 
     // ============================================
     // SHEET 1: Ringkasan
@@ -607,7 +609,6 @@ export default function Laporan() {
     });
 
     const dateHeaderFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFF2D0D0' } };
-    const subtotalFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFF9E5E5' } };
 
     let grandQty = 0, grandRevenue = 0, grandHpp = 0, grandProfit = 0;
 
