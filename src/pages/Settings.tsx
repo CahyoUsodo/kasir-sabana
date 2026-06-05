@@ -22,6 +22,19 @@ import { createUser, isValidPin, isValidUsername, saveSession } from '@/lib/auth
 import { usePWAInstall } from '@/hooks/use-pwa-install';
 
 export default function Pengaturan() {
+  const reviveDates = (obj: any): any => {
+    if (obj === null || obj === undefined) return obj;
+    const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d*)?(?:[-+]\d{2}:?\d{2}|Z)?$/;
+    if (typeof obj === 'string' && isoRegex.test(obj)) return new Date(obj);
+    if (Array.isArray(obj)) return obj.map(reviveDates);
+    if (typeof obj === 'object') {
+      const newObj: any = {};
+      for (const key in obj) newObj[key] = reviveDates(obj[key]);
+      return newObj;
+    }
+    return obj;
+  };
+
   const storeSettings = useLiveQuery(() => db.storeSettings.toCollection().first());
   const paymentMethods = useLiveQuery(() => db.paymentMethods.toArray());
   const categories = useLiveQuery(() => db.categories.where('isDeleted').equals(0).toArray());
@@ -134,7 +147,9 @@ export default function Pengaturan() {
         throw new Error(errorMessage);
       }
 
-      const { backupData: data } = await response.json();
+      const responseRes = await response.json();
+      let data = reviveDates(responseRes.backupData);
+
       if (!data || !data.version) {
         throw new Error('Data dari Google Drive tidak valid');
       }
@@ -455,7 +470,7 @@ export default function Pengaturan() {
       try {
         const text = await file.text();
         if (!text.trim()) { toast.error('File kosong'); return; }
-        const data = JSON.parse(text);
+        const data = reviveDates(JSON.parse(text));
         if (!data.version) { toast.error('File tidak valid'); return; }
 
         // Validate at least 1 table has data
