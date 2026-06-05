@@ -24,11 +24,39 @@ const queryClient = new QueryClient();
 
 import { useAutoBackup } from "@/hooks/useAutoBackup";
 
+import { db } from '@/lib/db';
+
 const App = () => {
   useAutoBackup();
 
   useEffect(() => {
     checkVersion();
+    
+    // Auto-fix any string dates that might be in IndexedDB from an old Google Drive restore
+    const fixStringDates = async () => {
+      try {
+        await db.transactions.toCollection().modify((t: any) => {
+          if (typeof t.date === 'string') t.date = new Date(t.date);
+          if (typeof t.openedAt === 'string') t.openedAt = new Date(t.openedAt);
+          if (typeof t.closedAt === 'string') t.closedAt = new Date(t.closedAt);
+        });
+        await db.storeSettings.toCollection().modify((s: any) => {
+          if (typeof s.lastBackupAt === 'string') s.lastBackupAt = new Date(s.lastBackupAt);
+        });
+        await db.stockIns.toCollection().modify((s: any) => {
+          if (typeof s.date === 'string') s.date = new Date(s.date);
+        });
+        await db.stockOuts.toCollection().modify((s: any) => {
+          if (typeof s.date === 'string') s.date = new Date(s.date);
+        });
+        await db.hppHistory.toCollection().modify((h: any) => {
+          if (typeof h.date === 'string') h.date = new Date(h.date);
+        });
+      } catch (e) {
+        console.error('Failed to fix dates', e);
+      }
+    };
+    fixStringDates();
   }, []);
 
   return (
