@@ -525,7 +525,7 @@ export default function Laporan() {
     const prodSubTotalProfit = prodSorted.reduce((s, p) => s + p.profit, 0);
     const prodTotalDiscount = totalDiscount;
 
-    const prodSubRow = wsProduk.addRow({ no: '', name: 'Sub Total Laba Kotor', qty: '', unit: '', gross: '', hpp: '', profit: prodSubTotalProfit, margin: '' });
+    const prodSubRow = wsProduk.addRow({ no: 'Sub Total Laba Kotor', name: '', qty: '', unit: '', gross: '', hpp: '', profit: prodSubTotalProfit, margin: '' });
     wsProduk.mergeCells(`A${prodSubRow.number}:F${prodSubRow.number}`);
     prodSubRow.getCell('A').alignment = { horizontal: 'right', vertical: 'middle' };
     prodSubRow.eachCell(cell => {
@@ -536,7 +536,7 @@ export default function Laporan() {
     });
 
     if (prodTotalDiscount > 0) {
-      const prodDiscRow = wsProduk.addRow({ no: '', name: 'Diskon', qty: '', unit: '', gross: '', hpp: '', profit: prodTotalDiscount, margin: '' });
+      const prodDiscRow = wsProduk.addRow({ no: 'Diskon', name: '', qty: '', unit: '', gross: '', hpp: '', profit: prodTotalDiscount, margin: '' });
       wsProduk.mergeCells(`A${prodDiscRow.number}:F${prodDiscRow.number}`);
       prodDiscRow.getCell('A').alignment = { horizontal: 'right', vertical: 'middle' };
       prodDiscRow.eachCell(cell => {
@@ -545,7 +545,7 @@ export default function Laporan() {
       });
     }
 
-    const prodGrandRow = wsProduk.addRow({ no: '', name: 'Grand Total', qty: '', unit: '', gross: '', hpp: '', profit: prodSubTotalProfit - prodTotalDiscount, margin: '' });
+    const prodGrandRow = wsProduk.addRow({ no: 'Grand Total Laba Kotor', name: '', qty: '', unit: '', gross: '', hpp: '', profit: prodSubTotalProfit - prodTotalDiscount, margin: '' });
     wsProduk.mergeCells(`A${prodGrandRow.number}:F${prodGrandRow.number}`);
     prodGrandRow.getCell('A').alignment = { horizontal: 'right', vertical: 'middle' };
     prodGrandRow.eachCell(cell => {
