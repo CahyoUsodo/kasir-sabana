@@ -509,6 +509,132 @@ export default function Laporan() {
     });
 
     // ============================================
+    // SHEET 4: Detail Penjualan Harian
+    // ============================================
+    const wsHarian = wb.addWorksheet('Detail Penjualan Harian');
+    wsHarian.columns = [
+      { header: 'Tanggal', key: 'date', width: 18 },
+      { header: 'Nama Produk', key: 'name', width: 30 },
+      { header: 'Jumlah Terjual', key: 'qty', width: 16 },
+      { header: 'Satuan', key: 'unit', width: 12 },
+      { header: 'Total Pendapatan Kotor', key: 'gross', width: 25, style: { numFmt: currencyFormat } },
+      { header: 'Total HPP (Modal)', key: 'hpp', width: 22, style: { numFmt: currencyFormat } },
+      { header: 'Total Laba Kotor', key: 'profit', width: 22, style: { numFmt: currencyFormat } },
+    ];
+
+    wsHarian.getRow(1).eachCell(cell => {
+      // @ts-ignore
+      cell.style = headerStyle;
+    });
+
+    // Build daily per-product aggregation: { 'dd-MM-yyyy': { productName: { qty, revenue, hpp, profit, productId } } }
+    const dailyAgg: Record<string, Record<string, {
+      name: string; qty: number; revenue: number;
+      hpp: number; profit: number; productId: number;
+    }>> = {};
+
+    transactions.forEach(t => {
+      const dateKey = format(new Date(t.date), 'dd-MM-yyyy', { locale: localeId });
+      if (!dailyAgg[dateKey]) dailyAgg[dateKey] = {};
+
+      const txItems = allItems.filter(item => item.transactionId === t.id);
+      txItems.forEach(item => {
+        const key = item.productName;
+        if (!dailyAgg[dateKey][key]) {
+          dailyAgg[dateKey][key] = { name: key, qty: 0, revenue: 0, hpp: 0, profit: 0, productId: item.productId };
+        }
+        dailyAgg[dateKey][key].qty += item.quantity;
+        dailyAgg[dateKey][key].revenue += item.subtotal;
+        dailyAgg[dateKey][key].hpp += item.hpp * item.quantity;
+        dailyAgg[dateKey][key].profit += (item.price - item.hpp) * item.quantity - item.discountAmount;
+      });
+    });
+
+    // Sort dates chronologically (dd-MM-yyyy -> parse back)
+    const sortedDates = Object.keys(dailyAgg).sort((a, b) => {
+      const [da, ma, ya] = a.split('-').map(Number);
+      const [db, mb, yb] = b.split('-').map(Number);
+      return new Date(ya, ma - 1, da).getTime() - new Date(yb, mb - 1, db).getTime();
+    });
+
+    const dateHeaderFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFF2D0D0' } };
+    const subtotalFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFF9E5E5' } };
+
+    let grandQty = 0, grandRevenue = 0, grandHpp = 0, grandProfit = 0;
+
+    sortedDates.forEach(dateKey => {
+      const productsOfDay = Object.values(dailyAgg[dateKey]).sort((a, b) => b.revenue - a.revenue);
+
+      // Date header row
+      const dateRow = wsHarian.addRow({ date: `📅 ${dateKey}`, name: '', qty: '', unit: '', gross: '', hpp: '', profit: '' });
+      wsHarian.mergeCells(`A${dateRow.number}:G${dateRow.number}`);
+      dateRow.getCell('A').font = { bold: true, size: 12, color: { argb: 'FFB42829' } };
+      // @ts-ignore
+      dateRow.getCell('A').fill = dateHeaderFill;
+      dateRow.getCell('A').alignment = { vertical: 'middle' };
+      dateRow.height = 22;
+
+      let dayQty = 0, dayRevenue = 0, dayHpp = 0, dayProfit = 0;
+
+      productsOfDay.forEach(p => {
+        const row = wsHarian.addRow({
+          date: '',
+          name: p.name,
+          qty: p.qty,
+          unit: productUnitMap[p.productId] || 'pcs',
+          gross: p.revenue,
+          hpp: p.hpp,
+          profit: p.profit,
+        });
+        row.eachCell(cell => { cell.border = cellBorder; });
+
+        dayQty += p.qty;
+        dayRevenue += p.revenue;
+        dayHpp += p.hpp;
+        dayProfit += p.profit;
+      });
+
+      // Subtotal row per date
+      const subRow = wsHarian.addRow({
+        date: '',
+        name: `Subtotal ${dateKey}`,
+        qty: dayQty,
+        unit: '',
+        gross: dayRevenue,
+        hpp: dayHpp,
+        profit: dayProfit,
+      });
+      subRow.eachCell(cell => {
+        cell.border = cellBorder;
+        cell.font = { bold: true, color: { argb: 'FFB42829' } };
+        // @ts-ignore
+        cell.fill = subtotalFill;
+      });
+
+      grandQty += dayQty;
+      grandRevenue += dayRevenue;
+      grandHpp += dayHpp;
+      grandProfit += dayProfit;
+    });
+
+    // Grand total row
+    const grandRow = wsHarian.addRow({
+      date: '',
+      name: 'GRAND TOTAL',
+      qty: grandQty,
+      unit: '',
+      gross: grandRevenue,
+      hpp: grandHpp,
+      profit: grandProfit,
+    });
+    grandRow.eachCell(cell => {
+      cell.border = cellBorder;
+      cell.font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+      // @ts-ignore
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB42829' } };
+    });
+
+    // ============================================
     // Trigger download
     // ============================================
     const fileName = `Laporan_${storeName.replace(/\s+/g, '_')}_${format(new Date(), 'yyyyMMdd_HHmm')}.xlsx`;
