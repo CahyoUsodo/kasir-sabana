@@ -68,8 +68,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Jika menggunakan FILE_ID (Bypass masalah Service Account Quota)
     if (fileId) {
+      // Force mimeType to application/json so Google Docs files get converted
       result = await drive.files.update({
         fileId: fileId,
+        requestBody: {
+          mimeType: 'application/json',
+        },
         media: media,
       });
       return res.status(200).json({ success: true, fileId: result.data.id });
