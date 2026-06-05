@@ -496,12 +496,10 @@ export default function Laporan() {
     allItems.forEach(item => {
       const key = item.productName;
       if (!prodAgg[key]) prodAgg[key] = { name: key, qty: 0, revenue: 0, hpp: 0, profit: 0, productId: item.productId };
-      const info = txDiscountInfo[item.transactionId] || { extraDiscount: 0, itemSubtotalSum: 1 };
-      const discShare = info.itemSubtotalSum > 0 ? (item.subtotal / info.itemSubtotalSum) * info.extraDiscount : 0;
       prodAgg[key].qty += item.quantity;
       prodAgg[key].revenue += item.subtotal;
       prodAgg[key].hpp += item.hpp * item.quantity;
-      prodAgg[key].profit += item.subtotal - (item.hpp * item.quantity) - discShare;
+      prodAgg[key].profit += item.subtotal - (item.hpp * item.quantity);
     });
 
     const prodSorted = Object.values(prodAgg).sort((a, b) => b.revenue - a.revenue);
@@ -519,6 +517,40 @@ export default function Laporan() {
         margin: margin
       });
       row.eachCell(cell => { cell.border = cellBorder; });
+    });
+
+    // Footer: Sub Total Laba Kotor, Diskon (conditional), Grand Total
+    const prodSubTotalProfit = prodSorted.reduce((s, p) => s + p.profit, 0);
+    const prodTotalDiscount = totalDiscount;
+
+    const prodSubRow = wsProduk.addRow({ no: '', name: 'Sub Total Laba Kotor', qty: '', unit: '', gross: '', hpp: '', profit: prodSubTotalProfit, margin: '' });
+    wsProduk.mergeCells(`A${prodSubRow.number}:F${prodSubRow.number}`);
+    prodSubRow.getCell('A').alignment = { horizontal: 'right', vertical: 'middle' };
+    prodSubRow.eachCell(cell => {
+      cell.border = cellBorder;
+      cell.font = { bold: true };
+      // @ts-ignore
+      cell.fill = subtotalFill;
+    });
+
+    if (prodTotalDiscount > 0) {
+      const prodDiscRow = wsProduk.addRow({ no: '', name: 'Diskon', qty: '', unit: '', gross: '', hpp: '', profit: prodTotalDiscount, margin: '' });
+      wsProduk.mergeCells(`A${prodDiscRow.number}:F${prodDiscRow.number}`);
+      prodDiscRow.getCell('A').alignment = { horizontal: 'right', vertical: 'middle' };
+      prodDiscRow.eachCell(cell => {
+        cell.border = cellBorder;
+        cell.font = { bold: true, color: { argb: 'FFB42829' } };
+      });
+    }
+
+    const prodGrandRow = wsProduk.addRow({ no: '', name: 'Grand Total', qty: '', unit: '', gross: '', hpp: '', profit: prodSubTotalProfit - prodTotalDiscount, margin: '' });
+    wsProduk.mergeCells(`A${prodGrandRow.number}:F${prodGrandRow.number}`);
+    prodGrandRow.getCell('A').alignment = { horizontal: 'right', vertical: 'middle' };
+    prodGrandRow.eachCell(cell => {
+      cell.border = cellBorder;
+      cell.font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+      // @ts-ignore
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB42829' } };
     });
 
     // ============================================
@@ -546,22 +578,24 @@ export default function Laporan() {
       hpp: number; profit: number; productId: number;
     }>> = {};
 
+    // Also build per-day discount totals
+    const dailyDiscountMap: Record<string, number> = {};
     transactions.forEach(t => {
       const dateKey = format(new Date(t.date), 'dd-MM-yyyy', { locale: localeId });
       if (!dailyAgg[dateKey]) dailyAgg[dateKey] = {};
+      if (!dailyDiscountMap[dateKey]) dailyDiscountMap[dateKey] = 0;
+      dailyDiscountMap[dateKey] += t.discountAmount;
 
       const txItems = allItems.filter(item => item.transactionId === t.id);
-      const info = txDiscountInfo[t.id!] || { extraDiscount: 0, itemSubtotalSum: 1 };
       txItems.forEach(item => {
         const key = item.productName;
         if (!dailyAgg[dateKey][key]) {
           dailyAgg[dateKey][key] = { name: key, qty: 0, revenue: 0, hpp: 0, profit: 0, productId: item.productId };
         }
-        const discShare = info.itemSubtotalSum > 0 ? (item.subtotal / info.itemSubtotalSum) * info.extraDiscount : 0;
         dailyAgg[dateKey][key].qty += item.quantity;
         dailyAgg[dateKey][key].revenue += item.subtotal;
         dailyAgg[dateKey][key].hpp += item.hpp * item.quantity;
-        dailyAgg[dateKey][key].profit += item.subtotal - (item.hpp * item.quantity) - discShare;
+        dailyAgg[dateKey][key].profit += item.subtotal - (item.hpp * item.quantity);
       });
     });
 
@@ -612,7 +646,7 @@ export default function Laporan() {
       // Subtotal row per date
       const subRow = wsHarian.addRow({
         date: '',
-        name: `Subtotal ${dateKey}`,
+        name: `Sub Total Laba Kotor ${dateKey}`,
         qty: dayQty,
         unit: '',
         gross: dayRevenue,
@@ -626,22 +660,50 @@ export default function Laporan() {
         cell.fill = subtotalFill;
       });
 
+      // Per-day discount row (only if that day has discounts)
+      const dayDiscount = dailyDiscountMap[dateKey] || 0;
+      if (dayDiscount > 0) {
+        const dayDiscRow = wsHarian.addRow({ date: '', name: `Diskon ${dateKey}`, qty: '', unit: '', gross: '', hpp: '', profit: dayDiscount });
+        dayDiscRow.eachCell(cell => {
+          cell.border = cellBorder;
+          cell.font = { bold: true, color: { argb: 'FFB42829' } };
+        });
+
+        const dayTotalRow = wsHarian.addRow({ date: '', name: `Total ${dateKey}`, qty: dayQty, unit: '', gross: dayRevenue, hpp: dayHpp, profit: dayProfit - dayDiscount });
+        dayTotalRow.eachCell(cell => {
+          cell.border = cellBorder;
+          cell.font = { bold: true, color: { argb: 'FFB42829' } };
+          // @ts-ignore
+          cell.fill = subtotalFill;
+        });
+      }
+
       grandQty += dayQty;
       grandRevenue += dayRevenue;
       grandHpp += dayHpp;
       grandProfit += dayProfit;
     });
 
-    // Grand total row
-    const grandRow = wsHarian.addRow({
-      date: '',
-      name: 'GRAND TOTAL',
-      qty: grandQty,
-      unit: '',
-      gross: grandRevenue,
-      hpp: grandHpp,
-      profit: grandProfit,
+    // Grand total footer: Sub Total, Diskon (conditional), Grand Total
+    const grandTotalDiscount = totalDiscount;
+
+    const grandSubRow = wsHarian.addRow({ date: '', name: 'Sub Total Laba Kotor', qty: grandQty, unit: '', gross: grandRevenue, hpp: grandHpp, profit: grandProfit });
+    grandSubRow.eachCell(cell => {
+      cell.border = cellBorder;
+      cell.font = { bold: true };
+      // @ts-ignore
+      cell.fill = subtotalFill;
     });
+
+    if (grandTotalDiscount > 0) {
+      const grandDiscRow = wsHarian.addRow({ date: '', name: 'Diskon', qty: '', unit: '', gross: '', hpp: '', profit: grandTotalDiscount });
+      grandDiscRow.eachCell(cell => {
+        cell.border = cellBorder;
+        cell.font = { bold: true, color: { argb: 'FFB42829' } };
+      });
+    }
+
+    const grandRow = wsHarian.addRow({ date: '', name: 'Grand Total', qty: grandQty, unit: '', gross: grandRevenue, hpp: grandHpp, profit: grandProfit - grandTotalDiscount });
     grandRow.eachCell(cell => {
       cell.border = cellBorder;
       cell.font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
