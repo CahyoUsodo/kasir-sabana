@@ -12,6 +12,8 @@ export async function performBackup(): Promise<boolean> {
 
   // Collect all data
   const allData = {
+    version: 4,
+    exportedAt: new Date().toISOString(),
     categories: await db.categories.toArray(),
     products: await db.products.toArray(),
     suppliers: await db.suppliers.toArray(),
