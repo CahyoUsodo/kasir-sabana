@@ -14,7 +14,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
   const [saving, setSaving] = useState(false);
-  const themeColor = '25'; // Default red theme as requested
+  const themeColor = '0'; // Default red theme as requested
 
   const handleFinish = async () => {
     if (!storeName.trim()) return;
