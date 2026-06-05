@@ -32,7 +32,7 @@ export default function AppLayout() {
   }
 
   return (
-    <div className="min-h-screen bg-background max-w-lg md:max-w-6xl mx-auto relative">
+    <div className="min-h-[100dvh] bg-background max-w-lg md:max-w-6xl mx-auto relative pt-[env(safe-area-inset-top)]">
       <main className="pb-20">
         <Outlet />
       </main>
