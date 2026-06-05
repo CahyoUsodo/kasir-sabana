@@ -60,7 +60,7 @@ export default function Laporan() {
 
   // P&L breakdown
   const totalRevenue = transactions?.reduce((s, t) => s + t.subtotal, 0) ?? 0;
-  const totalDiscount = transactions?.reduce((s, t) => s + t.discountAmount, 0) ?? 0;
+  const totalDiscount = transactions?.reduce((s, t) => s + (t.discountAmount || 0), 0) ?? 0;
   const totalHpp = allItems.reduce((s, item) => s + item.hpp * item.quantity, 0);
   const netSales = totalRevenue - totalDiscount; // same as totalSales
   const grossProfit = netSales - totalHpp;
@@ -109,7 +109,7 @@ export default function Laporan() {
     if (!productSales[item.productName]) productSales[item.productName] = { name: item.productName, qty: 0, revenue: 0, profit: 0 };
     productSales[item.productName].qty += item.quantity;
     productSales[item.productName].revenue += item.subtotal;
-    productSales[item.productName].profit += (item.price - item.hpp) * item.quantity - item.discountAmount;
+    productSales[item.productName].profit += (item.price - item.hpp) * item.quantity - (item.discountAmount || 0);
   });
   const topProducts = Object.values(productSales).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
 
@@ -415,12 +415,12 @@ export default function Laporan() {
     transactions.forEach((t, i) => {
       const txHpp = allItems
         .filter(item => item.transactionId === t.id)
-        .reduce((sum, item) => sum + item.hpp * item.quantity, 0);
-      const txNetSales = t.subtotal - t.discountAmount;
+        .reduce((sum, item) => sum + (item.hpp || 0) * item.quantity, 0);
+      const txNetSales = t.subtotal - (t.discountAmount || 0);
       const txProfit = txNetSales - txHpp;
       
       sumGross += t.subtotal;
-      sumDiscount += t.discountAmount;
+      sumDiscount += (t.discountAmount || 0);
       sumNet += txNetSales;
       sumHpp += txHpp;
       sumProfit += txProfit;
@@ -431,7 +431,7 @@ export default function Laporan() {
         receipt: t.receiptNumber,
         payment: pmMap[t.paymentMethodId] || 'Lainnya',
         gross: t.subtotal,
-        discount: t.discountAmount,
+        discount: (t.discountAmount || 0),
         net: txNetSales,
         hpp: txHpp,
         profit: txProfit
@@ -483,9 +483,9 @@ export default function Laporan() {
     const txDiscountInfo: Record<number, { extraDiscount: number; itemSubtotalSum: number }> = {};
     transactions.forEach(t => {
       const txItems = allItems.filter(item => item.transactionId === t.id);
-      const itemDiscountSum = txItems.reduce((s, item) => s + item.discountAmount, 0);
+      const itemDiscountSum = txItems.reduce((s, item) => s + (item.discountAmount || 0), 0);
       const itemSubtotalSum = txItems.reduce((s, item) => s + item.subtotal, 0);
-      if (t.id) txDiscountInfo[t.id] = { extraDiscount: t.discountAmount - itemDiscountSum, itemSubtotalSum };
+      if (t.id) txDiscountInfo[t.id] = { extraDiscount: (t.discountAmount || 0) - itemDiscountSum, itemSubtotalSum };
     });
 
     // Build per-product aggregation
@@ -584,7 +584,7 @@ export default function Laporan() {
       const dateKey = format(new Date(t.date), 'dd-MM-yyyy', { locale: localeId });
       if (!dailyAgg[dateKey]) dailyAgg[dateKey] = {};
       if (!dailyDiscountMap[dateKey]) dailyDiscountMap[dateKey] = 0;
-      dailyDiscountMap[dateKey] += t.discountAmount;
+      dailyDiscountMap[dateKey] += (t.discountAmount || 0);
 
       const txItems = allItems.filter(item => item.transactionId === t.id);
       txItems.forEach(item => {
