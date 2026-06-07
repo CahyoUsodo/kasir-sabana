@@ -25,7 +25,7 @@ export default defineConfig(({ mode }) => ({
         description: "Aplikasi kasir gratis untuk UMKM Indonesia. Offline & tanpa biaya.",
         start_url: "/",
         display: "standalone",
-        background_color: "#0F172A",
+        background_color: "#FEFEFE",
         theme_color: "#dc2626",
         orientation: "any",
         icons: [
