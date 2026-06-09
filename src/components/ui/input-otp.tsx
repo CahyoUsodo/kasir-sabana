@@ -23,10 +23,23 @@ InputOTPGroup.displayName = "InputOTPGroup";
 
 const InputOTPSlot = React.forwardRef<
   React.ElementRef<"div">,
-  React.ComponentPropsWithoutRef<"div"> & { index: number }
->(({ index, className, ...props }, ref) => {
+  Omit<React.ComponentPropsWithoutRef<"div">, "type"> & { index: number; type?: "text" | "password" }
+>(({ index, className, type = "text", ...props }, ref) => {
   const inputOTPContext = React.useContext(OTPInputContext);
   const { char, hasFakeCaret, isActive } = inputOTPContext.slots[index];
+  const [isMasked, setIsMasked] = React.useState(true);
+
+  React.useEffect(() => {
+    if (char) {
+      setIsMasked(false);
+      const timer = setTimeout(() => {
+        setIsMasked(true);
+      }, 800);
+      return () => clearTimeout(timer);
+    } else {
+      setIsMasked(true);
+    }
+  }, [char]);
 
   return (
     <div
@@ -38,7 +51,15 @@ const InputOTPSlot = React.forwardRef<
       )}
       {...props}
     >
-      {char}
+      {type === "password" && char ? (
+        isMasked ? (
+          <div className="h-2 w-2 rounded-full bg-foreground" />
+        ) : (
+          char
+        )
+      ) : (
+        char
+      )}
       {hasFakeCaret && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <div className="animate-caret-blink h-4 w-px bg-foreground duration-1000" />

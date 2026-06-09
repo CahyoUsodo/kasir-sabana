@@ -1467,12 +1467,12 @@ export default function Pengaturan() {
               pattern="[0-9]*"
             >
               <InputOTPGroup>
-                <InputOTPSlot index={0} className="w-11 h-11 text-lg" />
-                <InputOTPSlot index={1} className="w-11 h-11 text-lg" />
-                <InputOTPSlot index={2} className="w-11 h-11 text-lg" />
-                <InputOTPSlot index={3} className="w-11 h-11 text-lg" />
-                <InputOTPSlot index={4} className="w-11 h-11 text-lg" />
-                <InputOTPSlot index={5} className="w-11 h-11 text-lg" />
+                <InputOTPSlot index={0} className="w-11 h-11 text-lg" type="password" />
+                <InputOTPSlot index={1} className="w-11 h-11 text-lg" type="password" />
+                <InputOTPSlot index={2} className="w-11 h-11 text-lg" type="password" />
+                <InputOTPSlot index={3} className="w-11 h-11 text-lg" type="password" />
+                <InputOTPSlot index={4} className="w-11 h-11 text-lg" type="password" />
+                <InputOTPSlot index={5} className="w-11 h-11 text-lg" type="password" />
               </InputOTPGroup>
             </InputOTP>
             {pinManageError && (
