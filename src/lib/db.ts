@@ -178,6 +178,7 @@ export interface StoreSettings {
   deviceId: string;
   multiUserEnabled?: boolean; // CR-multiuser: opt-in flag
   googleDriveFileId?: string; // CR-multi-branch: specific file ID for this branch
+  securityPin?: string; // Hashed 6-digit security PIN
 }
 
 // === Database ===
@@ -415,6 +416,22 @@ class PosDatabase extends Dexie {
       await storeTable.toCollection().modify((s: Partial<StoreSettings>) => {
         if (s.multiUserEnabled === undefined) s.multiUserEnabled = false;
       });
+    });
+
+    // Version 7 — Security PIN for destructive actions
+    this.version(7).stores({
+      categories:       '++id, name, isDeleted',
+      products:         '++id, name, &sku, categoryId, barcode, isDeleted, createdBy, updatedBy',
+      suppliers:        '++id, name, isDeleted',
+      stockIns:         '++id, productId, supplierId, date, createdBy',
+      stockOuts:        '++id, productId, date, createdBy',
+      hppHistory:       '++id, productId, date',
+      paymentMethods:   '++id, name, category',
+      transactions:     '++id, date, &receiptNumber, paymentMethodId, status, orderNumber, createdBy',
+      transactionItems: '++id, transactionId, productId',
+      storeSettings:    '++id',
+      units:            '++id, &name, isDeleted',
+      users:            '++id, &username, role, isActive',
     });
   }
 }

@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type PaymentMethod, type Category, type Unit } from '@/lib/db';
 import { useState, useEffect, useRef } from 'react';
-import { Settings, Store, CreditCard, Tag, Download, Upload, Plus, Trash2, Edit2, Info, Truck, ArrowDownToLine, ArrowUpFromLine, ChevronRight, Receipt, Palette, HardDrive, Package, Camera, X, Ruler, Users as UsersIcon, ShieldCheck, LogOut, Smartphone, CheckCircle2, Globe, Share2, CloudUpload, CloudDownload } from 'lucide-react';
+import { Settings, Store, CreditCard, Tag, Download, Upload, Plus, Trash2, Edit2, Info, Truck, ArrowDownToLine, ArrowUpFromLine, ChevronRight, Receipt, Palette, HardDrive, Package, Camera, X, Ruler, Users as UsersIcon, ShieldCheck, LogOut, Smartphone, CheckCircle2, Globe, Share2, CloudUpload, CloudDownload, KeyRound } from 'lucide-react';
 import ThemeColorPicker from '@/components/ThemeColorPicker';
 import { setThemeColor } from '@/hooks/use-theme-color';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,15 +10,18 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
+import PinVerificationDialog from '@/components/PinVerificationDialog';
 import { toast } from 'sonner';
 import { exportBackupData } from '@/components/BackupReminder';
 import { performBackup } from '@/lib/backup';
 import { compressImage } from '@/lib/image-utils';
 import { useAuth } from '@/hooks/use-auth';
-import { createUser, isValidPin, isValidUsername, saveSession } from '@/lib/auth';
+import { createUser, hashPin, isValidPin, isValidUsername, saveSession } from '@/lib/auth';
 import { usePWAInstall } from '@/hooks/use-pwa-install';
 
 export default function Pengaturan() {
@@ -101,6 +104,110 @@ export default function Pengaturan() {
 
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
+
+  // Security PIN states
+  const [tempFileId, setTempFileId] = useState('');
+  const [pinManageOpen, setPinManageOpen] = useState(false);
+  const [pinManageMode, setPinManageMode] = useState<'setup' | 'change' | 'disable'>('setup');
+  const [pinStep, setPinStep] = useState<'verify_old' | 'enter_new' | 'confirm_new'>('enter_new');
+  const [pinInput, setPinInput] = useState('');
+  const [tempNewPin, setTempNewPin] = useState('');
+  const [pinManageError, setPinManageError] = useState('');
+  const [pinVerifyOpen, setPinVerifyOpen] = useState(false);
+  const [pinVerifyTitle, setPinVerifyTitle] = useState('Verifikasi PIN Otorisasi');
+  const [pinVerifyDesc, setPinVerifyDesc] = useState('Masukkan PIN keamanan 6 angka untuk menyetujui tindakan ini.');
+  const pinCallbackRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (storeSettings?.googleDriveFileId !== undefined) {
+      setTempFileId(storeSettings.googleDriveFileId || '');
+    }
+  }, [storeSettings?.googleDriveFileId]);
+
+  const runWithPinGate = (action: () => void, title?: string, desc?: string) => {
+    if (storeSettings?.securityPin) {
+      pinCallbackRef.current = action;
+      if (title) setPinVerifyTitle(title);
+      else setPinVerifyTitle('Verifikasi PIN Otorisasi');
+      if (desc) setPinVerifyDesc(desc);
+      else setPinVerifyDesc('Masukkan PIN keamanan 6 angka untuk menyetujui tindakan ini.');
+      setPinVerifyOpen(true);
+    } else {
+      action();
+    }
+  };
+
+  const openPinSetup = () => {
+    setPinManageMode('setup');
+    setPinStep('enter_new');
+    setPinInput('');
+    setTempNewPin('');
+    setPinManageError('');
+    setPinManageOpen(true);
+  };
+
+  const openPinChange = () => {
+    setPinManageMode('change');
+    setPinStep('verify_old');
+    setPinInput('');
+    setTempNewPin('');
+    setPinManageError('');
+    setPinManageOpen(true);
+  };
+
+  const openPinDisable = () => {
+    setPinManageMode('disable');
+    setPinStep('verify_old');
+    setPinInput('');
+    setTempNewPin('');
+    setPinManageError('');
+    setPinManageOpen(true);
+  };
+
+  const handlePinManageOTPChange = async (val: string) => {
+    setPinInput(val);
+    setPinManageError('');
+
+    if (val.length === 6) {
+      if (pinStep === 'verify_old') {
+        const hashed = await hashPin(val, storeSettings?.deviceId || '');
+        if (hashed === storeSettings?.securityPin) {
+          if (pinManageMode === 'change') {
+            setPinStep('enter_new');
+            setPinInput('');
+          } else if (pinManageMode === 'disable') {
+            if (storeSettings?.id) {
+              await db.storeSettings.update(storeSettings.id, { securityPin: undefined });
+              toast.success('PIN Otorisasi berhasil dinonaktifkan');
+              setPinManageOpen(false);
+            }
+          }
+        } else {
+          setPinManageError('PIN lama salah');
+          setPinInput('');
+        }
+      } else if (pinStep === 'enter_new') {
+        setTempNewPin(val);
+        setPinStep('confirm_new');
+        setPinInput('');
+      } else if (pinStep === 'confirm_new') {
+        if (val === tempNewPin) {
+          if (storeSettings?.id) {
+            const hashed = await hashPin(val, storeSettings.deviceId);
+            await db.storeSettings.update(storeSettings.id, { securityPin: hashed });
+            toast.success(pinManageMode === 'setup' ? 'PIN Otorisasi berhasil diaktifkan' : 'PIN Otorisasi berhasil diubah');
+            setPinManageOpen(false);
+          }
+        } else {
+          setPinManageError('Konfirmasi PIN tidak cocok. Silakan ulangi.');
+          setPinInput('');
+          setPinStep('enter_new');
+          setTempNewPin('');
+        }
+      }
+    }
+  };
+
   const handleManualBackup = async () => {
     setIsBackingUp(true);
     try {
@@ -127,141 +234,147 @@ export default function Pengaturan() {
     // Confirm before restore
     if (!confirm('Data yang ada sekarang akan diganti dengan data dari Google Drive. Lanjutkan?')) return;
 
-    setIsRestoring(true);
-    try {
-      const isCapacitor = window.location.origin.includes('localhost') || window.location.protocol === 'capacitor:';
-      const apiUrl = isCapacitor ? 'https://kasir-sabana-5bf1.vercel.app/api/restore' : '/api/restore';
-
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileId: fileId.trim() })
-      });
-
-      if (!response.ok) {
-        let errorMessage = 'Gagal mengambil data dari Google Drive.';
+    runWithPinGate(
+      async () => {
+        setIsRestoring(true);
         try {
-          const errData = await response.json();
-          if (errData.error) errorMessage = errData.error;
-        } catch { /* ignore */ }
-        throw new Error(errorMessage);
-      }
+          const isCapacitor = window.location.origin.includes('localhost') || window.location.protocol === 'capacitor:';
+          const apiUrl = isCapacitor ? 'https://kasir-sabana-5bf1.vercel.app/api/restore' : '/api/restore';
 
-      const responseRes = await response.json();
-      let data = reviveDates(responseRes.backupData);
+          const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileId: fileId.trim() })
+          });
 
-      if (!data || !data.version) {
-        throw new Error('Data dari Google Drive tidak valid');
-      }
+          if (!response.ok) {
+            let errorMessage = 'Gagal mengambil data dari Google Drive.';
+            try {
+              const errData = await response.json();
+              if (errData.error) errorMessage = errData.error;
+            } catch { /* ignore */ }
+            throw new Error(errorMessage);
+          }
 
-      // Validate at least 1 table has data
-      const hasSomeData = ['categories', 'products', 'suppliers', 'transactions', 'paymentMethods'].some(
-        key => Array.isArray(data[key]) && data[key].length > 0
-      );
-      if (!hasSomeData) { throw new Error('File backup tidak berisi data'); }
+          const responseRes = await response.json();
+          let data = reviveDates(responseRes.backupData);
 
-      // Snapshot for rollback
-      const snapshot = {
-        categories: await db.categories.toArray(),
-        products: await db.products.toArray(),
-        suppliers: await db.suppliers.toArray(),
-        stockIns: await db.stockIns.toArray(),
-        stockOuts: await db.stockOuts.toArray(),
-        hppHistory: await db.hppHistory.toArray(),
-        paymentMethods: await db.paymentMethods.toArray(),
-        transactions: await db.transactions.toArray(),
-        transactionItems: await db.transactionItems.toArray(),
-        storeSettings: await db.storeSettings.toArray(),
-        users: await db.users.toArray(),
-        units: await db.units.toArray(),
-      };
+          if (!data || !data.version) {
+            throw new Error('Data dari Google Drive tidak valid');
+          }
 
-      try {
-        // Clear all tables
-        await db.categories.clear(); await db.products.clear(); await db.suppliers.clear();
-        await db.stockIns.clear(); await db.stockOuts.clear(); await db.hppHistory.clear();
-        await db.paymentMethods.clear(); await db.transactions.clear(); await db.transactionItems.clear();
-        await db.storeSettings.clear();
-        if (Array.isArray(data.users)) { await db.users.clear(); }
-        await db.units.clear();
+          // Validate at least 1 table has data
+          const hasSomeData = ['categories', 'products', 'suppliers', 'transactions', 'paymentMethods'].some(
+            key => Array.isArray(data[key]) && data[key].length > 0
+          );
+          if (!hasSomeData) { throw new Error('File backup tidak berisi data'); }
 
-        // BulkAdd from downloaded data
-        if (data.categories?.length) await db.categories.bulkAdd(data.categories);
-        if (data.products?.length) await db.products.bulkAdd(data.products);
-        if (data.suppliers?.length) await db.suppliers.bulkAdd(data.suppliers);
-        if (data.stockIns?.length) await db.stockIns.bulkAdd(data.stockIns);
-        if (data.stockOuts?.length) await db.stockOuts.bulkAdd(data.stockOuts);
-        if (data.hppHistory?.length) await db.hppHistory.bulkAdd(data.hppHistory);
-        if (data.paymentMethods?.length) await db.paymentMethods.bulkAdd(data.paymentMethods);
-        if (data.transactions?.length) await db.transactions.bulkAdd(data.transactions);
-        if (data.storeSettings?.length) await db.storeSettings.bulkAdd(data.storeSettings);
-        if (data.users?.length) await db.users.bulkAdd(data.users);
+          // Snapshot for rollback
+          const snapshot = {
+            categories: await db.categories.toArray(),
+            products: await db.products.toArray(),
+            suppliers: await db.suppliers.toArray(),
+            stockIns: await db.stockIns.toArray(),
+            stockOuts: await db.stockOuts.toArray(),
+            hppHistory: await db.hppHistory.toArray(),
+            paymentMethods: await db.paymentMethods.toArray(),
+            transactions: await db.transactions.toArray(),
+            transactionItems: await db.transactionItems.toArray(),
+            storeSettings: await db.storeSettings.toArray(),
+            users: await db.users.toArray(),
+            units: await db.units.toArray(),
+          };
 
-        if (Array.isArray(data.units) && data.units.length > 0) {
-          await db.units.bulkAdd(data.units);
-        } else {
-          const now = new Date();
-          const defaults = ['pcs', 'kg', 'gram', 'liter', 'ml', 'porsi', 'cup', 'botol', 'bungkus'];
-          const seen = new Set<string>();
-          const toAdd: any[] = [];
-          for (const name of defaults) { seen.add(name); toAdd.push({ name, isDefault: 1, createdAt: now, isDeleted: 0, deletedAt: null }); }
-          if (Array.isArray(data.products)) {
-            for (const p of data.products) {
-              const u = (p?.unit as string | undefined)?.trim();
-              if (!u || seen.has(u)) continue;
-              seen.add(u); toAdd.push({ name: u, isDefault: 0, createdAt: now, isDeleted: 0, deletedAt: null });
+          try {
+            // Clear all tables
+            await db.categories.clear(); await db.products.clear(); await db.suppliers.clear();
+            await db.stockIns.clear(); await db.stockOuts.clear(); await db.hppHistory.clear();
+            await db.paymentMethods.clear(); await db.transactions.clear(); await db.transactionItems.clear();
+            await db.storeSettings.clear();
+            if (Array.isArray(data.users)) { await db.users.clear(); }
+            await db.units.clear();
+
+            // BulkAdd from downloaded data
+            if (data.categories?.length) await db.categories.bulkAdd(data.categories);
+            if (data.products?.length) await db.products.bulkAdd(data.products);
+            if (data.suppliers?.length) await db.suppliers.bulkAdd(data.suppliers);
+            if (data.stockIns?.length) await db.stockIns.bulkAdd(data.stockIns);
+            if (data.stockOuts?.length) await db.stockOuts.bulkAdd(data.stockOuts);
+            if (data.hppHistory?.length) await db.hppHistory.bulkAdd(data.hppHistory);
+            if (data.paymentMethods?.length) await db.paymentMethods.bulkAdd(data.paymentMethods);
+            if (data.transactions?.length) await db.transactions.bulkAdd(data.transactions);
+            if (data.storeSettings?.length) await db.storeSettings.bulkAdd(data.storeSettings);
+            if (data.users?.length) await db.users.bulkAdd(data.users);
+
+            if (Array.isArray(data.units) && data.units.length > 0) {
+              await db.units.bulkAdd(data.units);
+            } else {
+              const now = new Date();
+              const defaults = ['pcs', 'kg', 'gram', 'liter', 'ml', 'porsi', 'cup', 'botol', 'bungkus'];
+              const seen = new Set<string>();
+              const toAdd: any[] = [];
+              for (const name of defaults) { seen.add(name); toAdd.push({ name, isDefault: 1, createdAt: now, isDeleted: 0, deletedAt: null }); }
+              if (Array.isArray(data.products)) {
+                for (const p of data.products) {
+                  const u = (p?.unit as string | undefined)?.trim();
+                  if (!u || seen.has(u)) continue;
+                  seen.add(u); toAdd.push({ name: u, isDefault: 0, createdAt: now, isDeleted: 0, deletedAt: null });
+                }
+              }
+              if (toAdd.length) await db.units.bulkAdd(toAdd);
+            }
+
+            if (data.transactionItems?.length) {
+              await db.transactionItems.bulkAdd(data.transactionItems);
+            } else if (data.version === 1 && data.transactions?.length) {
+              for (const t of data.transactions) {
+                if (Array.isArray(t.items) && t.items.length > 0) {
+                  const records = t.items.map((item: any) => ({
+                    transactionId: t.id, productId: item.productId, productName: item.productName,
+                    quantity: item.quantity, price: item.price, hpp: item.hpp,
+                    discountType: item.discountType, discountValue: item.discountValue,
+                    discountAmount: item.discountAmount, subtotal: item.subtotal,
+                  }));
+                  await db.transactionItems.bulkAdd(records);
+                }
+              }
+            }
+
+            toast.success('Data berhasil di-restore dari Google Drive!');
+          } catch (importErr) {
+            // Rollback
+            try {
+              await db.categories.clear(); await db.products.clear(); await db.suppliers.clear();
+              await db.stockIns.clear(); await db.stockOuts.clear(); await db.hppHistory.clear();
+              await db.paymentMethods.clear(); await db.transactions.clear(); await db.transactionItems.clear();
+              await db.storeSettings.clear(); await db.users.clear(); await db.units.clear();
+
+              if (snapshot.categories.length) await db.categories.bulkAdd(snapshot.categories);
+              if (snapshot.products.length) await db.products.bulkAdd(snapshot.products);
+              if (snapshot.suppliers.length) await db.suppliers.bulkAdd(snapshot.suppliers);
+              if (snapshot.stockIns.length) await db.stockIns.bulkAdd(snapshot.stockIns);
+              if (snapshot.stockOuts.length) await db.stockOuts.bulkAdd(snapshot.stockOuts);
+              if (snapshot.hppHistory.length) await db.hppHistory.bulkAdd(snapshot.hppHistory);
+              if (snapshot.paymentMethods.length) await db.paymentMethods.bulkAdd(snapshot.paymentMethods);
+              if (snapshot.transactions.length) await db.transactions.bulkAdd(snapshot.transactions);
+              if (snapshot.transactionItems.length) await db.transactionItems.bulkAdd(snapshot.transactionItems);
+              if (snapshot.storeSettings.length) await db.storeSettings.bulkAdd(snapshot.storeSettings);
+              if (snapshot.users.length) await db.users.bulkAdd(snapshot.users);
+              if (snapshot.units.length) await db.units.bulkAdd(snapshot.units);
+              toast.error('Import gagal, data dikembalikan');
+            } catch {
+              toast.error('Import gagal dan rollback gagal.');
             }
           }
-          if (toAdd.length) await db.units.bulkAdd(toAdd);
+        } catch (error: any) {
+          toast.error(error.message || 'Gagal restore dari Google Drive');
+        } finally {
+          setIsRestoring(false);
         }
-
-        if (data.transactionItems?.length) {
-          await db.transactionItems.bulkAdd(data.transactionItems);
-        } else if (data.version === 1 && data.transactions?.length) {
-          for (const t of data.transactions) {
-            if (Array.isArray(t.items) && t.items.length > 0) {
-              const records = t.items.map((item: any) => ({
-                transactionId: t.id, productId: item.productId, productName: item.productName,
-                quantity: item.quantity, price: item.price, hpp: item.hpp,
-                discountType: item.discountType, discountValue: item.discountValue,
-                discountAmount: item.discountAmount, subtotal: item.subtotal,
-              }));
-              await db.transactionItems.bulkAdd(records);
-            }
-          }
-        }
-
-        toast.success('Data berhasil di-restore dari Google Drive!');
-      } catch (importErr) {
-        // Rollback
-        try {
-          await db.categories.clear(); await db.products.clear(); await db.suppliers.clear();
-          await db.stockIns.clear(); await db.stockOuts.clear(); await db.hppHistory.clear();
-          await db.paymentMethods.clear(); await db.transactions.clear(); await db.transactionItems.clear();
-          await db.storeSettings.clear(); await db.users.clear(); await db.units.clear();
-
-          if (snapshot.categories.length) await db.categories.bulkAdd(snapshot.categories);
-          if (snapshot.products.length) await db.products.bulkAdd(snapshot.products);
-          if (snapshot.suppliers.length) await db.suppliers.bulkAdd(snapshot.suppliers);
-          if (snapshot.stockIns.length) await db.stockIns.bulkAdd(snapshot.stockIns);
-          if (snapshot.stockOuts.length) await db.stockOuts.bulkAdd(snapshot.stockOuts);
-          if (snapshot.hppHistory.length) await db.hppHistory.bulkAdd(snapshot.hppHistory);
-          if (snapshot.paymentMethods.length) await db.paymentMethods.bulkAdd(snapshot.paymentMethods);
-          if (snapshot.transactions.length) await db.transactions.bulkAdd(snapshot.transactions);
-          if (snapshot.transactionItems.length) await db.transactionItems.bulkAdd(snapshot.transactionItems);
-          if (snapshot.storeSettings.length) await db.storeSettings.bulkAdd(snapshot.storeSettings);
-          if (snapshot.users.length) await db.users.bulkAdd(snapshot.users);
-          if (snapshot.units.length) await db.units.bulkAdd(snapshot.units);
-          toast.error('Import gagal, data dikembalikan');
-        } catch {
-          toast.error('Import gagal dan rollback gagal.');
-        }
-      }
-    } catch (error: any) {
-      toast.error(error.message || 'Gagal restore dari Google Drive');
-    } finally {
-      setIsRestoring(false);
-    }
+      },
+      'Verifikasi PIN Restore GDrive',
+      'Masukkan PIN keamanan 6 angka untuk menyetujui restore data dari Google Drive.'
+    );
   };
 
   const openStoreEdit = () => {
@@ -479,125 +592,133 @@ export default function Pengaturan() {
         );
         if (!hasSomeData) { toast.error('File backup tidak berisi data'); return; }
 
-        // CR-7: Snapshot existing data before clearing
-        const snapshot = {
-          categories: await db.categories.toArray(),
-          products: await db.products.toArray(),
-          suppliers: await db.suppliers.toArray(),
-          stockIns: await db.stockIns.toArray(),
-          stockOuts: await db.stockOuts.toArray(),
-          hppHistory: await db.hppHistory.toArray(),
-          paymentMethods: await db.paymentMethods.toArray(),
-          transactions: await db.transactions.toArray(),
-          transactionItems: await db.transactionItems.toArray(),
-          storeSettings: await db.storeSettings.toArray(),
-          users: await db.users.toArray(),
-          units: await db.units.toArray(),
-        };
+        // Ask for confirmation
+        if (!confirm('Data yang ada sekarang akan diganti dengan data dari file backup. Lanjutkan?')) return;
 
-        try {
-          // Clear all tables
-          await db.categories.clear(); await db.products.clear(); await db.suppliers.clear();
-          await db.stockIns.clear(); await db.stockOuts.clear(); await db.hppHistory.clear();
-          await db.paymentMethods.clear(); await db.transactions.clear(); await db.transactionItems.clear();
-          await db.storeSettings.clear();
-          // Only clear users if backup file has them (v4+); preserve user accounts
-          // when restoring older backups (v1-v3) so login still works after restore.
-          if (Array.isArray(data.users)) {
-            await db.users.clear();
-          }
-          await db.units.clear();
+        runWithPinGate(
+          async () => {
+            // Snapshot existing data before clearing
+            const snapshot = {
+              categories: await db.categories.toArray(),
+              products: await db.products.toArray(),
+              suppliers: await db.suppliers.toArray(),
+              stockIns: await db.stockIns.toArray(),
+              stockOuts: await db.stockOuts.toArray(),
+              hppHistory: await db.hppHistory.toArray(),
+              paymentMethods: await db.paymentMethods.toArray(),
+              transactions: await db.transactions.toArray(),
+              transactionItems: await db.transactionItems.toArray(),
+              storeSettings: await db.storeSettings.toArray(),
+              users: await db.users.toArray(),
+              units: await db.units.toArray(),
+            };
 
-          // BulkAdd from file
-          if (data.categories?.length) await db.categories.bulkAdd(data.categories);
-          if (data.products?.length) await db.products.bulkAdd(data.products);
-          if (data.suppliers?.length) await db.suppliers.bulkAdd(data.suppliers);
-          if (data.stockIns?.length) await db.stockIns.bulkAdd(data.stockIns);
-          if (data.stockOuts?.length) await db.stockOuts.bulkAdd(data.stockOuts);
-          if (data.hppHistory?.length) await db.hppHistory.bulkAdd(data.hppHistory);
-          if (data.paymentMethods?.length) await db.paymentMethods.bulkAdd(data.paymentMethods);
-          if (data.transactions?.length) await db.transactions.bulkAdd(data.transactions);
-          if (data.storeSettings?.length) await db.storeSettings.bulkAdd(data.storeSettings);
-          if (data.users?.length) await db.users.bulkAdd(data.users);
-
-          // Units (v3+ backup) or harvest from products (v1/v2 backup)
-          if (Array.isArray(data.units) && data.units.length > 0) {
-            await db.units.bulkAdd(data.units);
-          } else {
-            const now = new Date();
-            const defaults = ['pcs', 'kg', 'gram', 'liter', 'ml', 'porsi', 'cup', 'botol', 'bungkus'];
-            const seen = new Set<string>();
-            const toAdd: any[] = [];
-
-            for (const name of defaults) {
-              seen.add(name);
-              toAdd.push({ name, isDefault: 1, createdAt: now, isDeleted: 0, deletedAt: null });
-            }
-            if (Array.isArray(data.products)) {
-              for (const p of data.products) {
-                const u = (p?.unit as string | undefined)?.trim();
-                if (!u || seen.has(u)) continue;
-                seen.add(u);
-                toAdd.push({ name: u, isDefault: 0, createdAt: now, isDeleted: 0, deletedAt: null });
+            setIsRestoring(true);
+            try {
+              // Clear all tables
+              await db.categories.clear(); await db.products.clear(); await db.suppliers.clear();
+              await db.stockIns.clear(); await db.stockOuts.clear(); await db.hppHistory.clear();
+              await db.paymentMethods.clear(); await db.transactions.clear(); await db.transactionItems.clear();
+              await db.storeSettings.clear();
+              if (Array.isArray(data.users)) {
+                await db.users.clear();
               }
-            }
-            if (toAdd.length) await db.units.bulkAdd(toAdd);
-          }
+              await db.units.clear();
 
-          // Handle transactionItems
-          if (data.transactionItems?.length) {
-            // v2 format: items already in separate table
-            await db.transactionItems.bulkAdd(data.transactionItems);
-          } else if (data.version === 1 && data.transactions?.length) {
-            // v1 format: migrate embedded items[] to transactionItems
-            for (const t of data.transactions) {
-              if (Array.isArray(t.items) && t.items.length > 0) {
-                const records = t.items.map((item: any) => ({
-                  transactionId: t.id,
-                  productId: item.productId,
-                  productName: item.productName,
-                  quantity: item.quantity,
-                  price: item.price,
-                  hpp: item.hpp,
-                  discountType: item.discountType,
-                  discountValue: item.discountValue,
-                  discountAmount: item.discountAmount,
-                  subtotal: item.subtotal,
-                }));
-                await db.transactionItems.bulkAdd(records);
+              // BulkAdd from file
+              if (data.categories?.length) await db.categories.bulkAdd(data.categories);
+              if (data.products?.length) await db.products.bulkAdd(data.products);
+              if (data.suppliers?.length) await db.suppliers.bulkAdd(data.suppliers);
+              if (data.stockIns?.length) await db.stockIns.bulkAdd(data.stockIns);
+              if (data.stockOuts?.length) await db.stockOuts.bulkAdd(data.stockOuts);
+              if (data.hppHistory?.length) await db.hppHistory.bulkAdd(data.hppHistory);
+              if (data.paymentMethods?.length) await db.paymentMethods.bulkAdd(data.paymentMethods);
+              if (data.transactions?.length) await db.transactions.bulkAdd(data.transactions);
+              if (data.storeSettings?.length) await db.storeSettings.bulkAdd(data.storeSettings);
+              if (data.users?.length) await db.users.bulkAdd(data.users);
+
+              // Units (v3+ backup) or harvest from products (v1/v2 backup)
+              if (Array.isArray(data.units) && data.units.length > 0) {
+                await db.units.bulkAdd(data.units);
+              } else {
+                const now = new Date();
+                const defaults = ['pcs', 'kg', 'gram', 'liter', 'ml', 'porsi', 'cup', 'botol', 'bungkus'];
+                const seen = new Set<string>();
+                const toAdd: any[] = [];
+
+                for (const name of defaults) {
+                  seen.add(name);
+                  toAdd.push({ name, isDefault: 1, createdAt: now, isDeleted: 0, deletedAt: null });
+                }
+                if (Array.isArray(data.products)) {
+                  for (const p of data.products) {
+                    const u = (p?.unit as string | undefined)?.trim();
+                    if (!u || seen.has(u)) continue;
+                    seen.add(u);
+                    toAdd.push({ name: u, isDefault: 0, createdAt: now, isDeleted: 0, deletedAt: null });
+                  }
+                }
+                if (toAdd.length) await db.units.bulkAdd(toAdd);
               }
+
+              // Handle transactionItems
+              if (data.transactionItems?.length) {
+                await db.transactionItems.bulkAdd(data.transactionItems);
+              } else if (data.version === 1 && data.transactions?.length) {
+                for (const t of data.transactions) {
+                  if (Array.isArray(t.items) && t.items.length > 0) {
+                    const records = t.items.map((item: any) => ({
+                      transactionId: t.id,
+                      productId: item.productId,
+                      productName: item.productName,
+                      quantity: item.quantity,
+                      price: item.price,
+                      hpp: item.hpp,
+                      discountType: item.discountType,
+                      discountValue: item.discountValue,
+                      discountAmount: item.discountAmount,
+                      subtotal: item.subtotal,
+                    }));
+                    await db.transactionItems.bulkAdd(records);
+                  }
+                }
+              }
+
+              toast.success('Data berhasil di-restore!');
+            } catch (importErr) {
+              // Rollback — restore from snapshot
+              try {
+                await db.categories.clear(); await db.products.clear(); await db.suppliers.clear();
+                await db.stockIns.clear(); await db.stockOuts.clear(); await db.hppHistory.clear();
+                await db.paymentMethods.clear(); await db.transactions.clear(); await db.transactionItems.clear();
+                await db.storeSettings.clear();
+                await db.users.clear();
+                await db.units.clear();
+
+                if (snapshot.categories.length) await db.categories.bulkAdd(snapshot.categories);
+                if (snapshot.products.length) await db.products.bulkAdd(snapshot.products);
+                if (snapshot.suppliers.length) await db.suppliers.bulkAdd(snapshot.suppliers);
+                if (snapshot.stockIns.length) await db.stockIns.bulkAdd(snapshot.stockIns);
+                if (snapshot.stockOuts.length) await db.stockOuts.bulkAdd(snapshot.stockOuts);
+                if (snapshot.hppHistory.length) await db.hppHistory.bulkAdd(snapshot.hppHistory);
+                if (snapshot.paymentMethods.length) await db.paymentMethods.bulkAdd(snapshot.paymentMethods);
+                if (snapshot.transactions.length) await db.transactions.bulkAdd(snapshot.transactions);
+                if (snapshot.transactionItems.length) await db.transactionItems.bulkAdd(snapshot.transactionItems);
+                if (snapshot.storeSettings.length) await db.storeSettings.bulkAdd(snapshot.storeSettings);
+                if (snapshot.users.length) await db.users.bulkAdd(snapshot.users);
+                if (snapshot.units.length) await db.units.bulkAdd(snapshot.units);
+
+                toast.error('Import gagal, data dikembalikan');
+              } catch {
+                toast.error('Import gagal dan rollback gagal. Coba restore dari file backup.');
+              }
+            } finally {
+              setIsRestoring(false);
             }
-          }
-
-          toast.success('Data berhasil di-restore!');
-        } catch (importErr) {
-          // CR-7: Rollback — restore from snapshot
-          try {
-            await db.categories.clear(); await db.products.clear(); await db.suppliers.clear();
-            await db.stockIns.clear(); await db.stockOuts.clear(); await db.hppHistory.clear();
-            await db.paymentMethods.clear(); await db.transactions.clear(); await db.transactionItems.clear();
-            await db.storeSettings.clear();
-            await db.users.clear();
-            await db.units.clear();
-
-            if (snapshot.categories.length) await db.categories.bulkAdd(snapshot.categories);
-            if (snapshot.products.length) await db.products.bulkAdd(snapshot.products);
-            if (snapshot.suppliers.length) await db.suppliers.bulkAdd(snapshot.suppliers);
-            if (snapshot.stockIns.length) await db.stockIns.bulkAdd(snapshot.stockIns);
-            if (snapshot.stockOuts.length) await db.stockOuts.bulkAdd(snapshot.stockOuts);
-            if (snapshot.hppHistory.length) await db.hppHistory.bulkAdd(snapshot.hppHistory);
-            if (snapshot.paymentMethods.length) await db.paymentMethods.bulkAdd(snapshot.paymentMethods);
-            if (snapshot.transactions.length) await db.transactions.bulkAdd(snapshot.transactions);
-            if (snapshot.transactionItems.length) await db.transactionItems.bulkAdd(snapshot.transactionItems);
-            if (snapshot.storeSettings.length) await db.storeSettings.bulkAdd(snapshot.storeSettings);
-            if (snapshot.users.length) await db.users.bulkAdd(snapshot.users);
-            if (snapshot.units.length) await db.units.bulkAdd(snapshot.units);
-
-            toast.error('Import gagal, data dikembalikan');
-          } catch {
-            toast.error('Import gagal dan rollback gagal. Coba restore dari file backup.');
-          }
-        }
+          },
+          'Verifikasi PIN Import',
+          'Masukkan PIN keamanan 6 angka untuk menyetujui restore data dari file.'
+        );
       } catch { toast.error('Gagal membaca file'); }
     };
     input.click();
@@ -791,6 +912,48 @@ export default function Pengaturan() {
 
 
 
+      {/* PIN Otorisasi */}
+      {isOwner && (
+        <Card className="border-0 shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-1.5">
+              <KeyRound className="w-4 h-4 text-primary" /> PIN Otorisasi
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Status PIN Otorisasi</p>
+                <p className="text-xs text-muted-foreground font-normal">
+                  {storeSettings?.securityPin
+                    ? 'Aktif (Melindungi hapus transaksi, ubah GDrive ID, restore data)'
+                    : 'Tidak Aktif (Tindakan sensitif tidak dilindungi PIN)'}
+                </p>
+              </div>
+              <Badge variant={storeSettings?.securityPin ? 'default' : 'secondary'} className="text-xs">
+                {storeSettings?.securityPin ? 'Aktif' : 'Nonaktif'}
+              </Badge>
+            </div>
+            <div className="flex gap-2">
+              {!storeSettings?.securityPin ? (
+                <Button className="w-full h-10 text-sm gap-2" onClick={openPinSetup}>
+                  Aktifkan PIN Otorisasi
+                </Button>
+              ) : (
+                <>
+                  <Button variant="outline" className="flex-1 h-10 text-sm gap-2" onClick={openPinChange}>
+                    Ubah PIN
+                  </Button>
+                  <Button variant="outline" className="flex-1 h-10 text-sm gap-2 text-destructive border-destructive/20 hover:bg-destructive/5" onClick={openPinDisable}>
+                    Nonaktifkan
+                  </Button>
+                </>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Backup & Restore */}
       {can('manage_backup') && (
       <Card className="border-0 shadow-sm">
@@ -800,16 +963,34 @@ export default function Pengaturan() {
         <CardContent className="space-y-4">
           <div className="space-y-1.5">
             <Label className="text-xs">Google Drive File ID (Bypass Error Service Account & Multi-Cabang)</Label>
-            <Input 
-              value={storeSettings?.googleDriveFileId || ''} 
-              onChange={async (e) => {
-                if (storeSettings?.id) {
-                  await db.storeSettings.update(storeSettings.id, { googleDriveFileId: e.target.value.trim() });
-                }
-              }}
-              placeholder="Masukkan ID File Docs (opsional)" 
-              className="h-9 text-xs"
-            />
+            <div className="flex gap-2">
+              <Input 
+                value={tempFileId} 
+                onChange={(e) => setTempFileId(e.target.value)}
+                placeholder="Masukkan ID File Docs (opsional)" 
+                className="h-9 text-xs flex-1"
+              />
+              {tempFileId !== (storeSettings?.googleDriveFileId || '') && (
+                <Button 
+                  size="sm" 
+                  className="h-9 text-xs" 
+                  onClick={() => {
+                    runWithPinGate(
+                      async () => {
+                        if (storeSettings?.id) {
+                          await db.storeSettings.update(storeSettings.id, { googleDriveFileId: tempFileId.trim() });
+                          toast.success('Google Drive File ID disimpan');
+                        }
+                      },
+                      'Verifikasi PIN Pengaturan',
+                      'Masukkan PIN keamanan 6 angka untuk mengubah Google Drive File ID.'
+                    );
+                  }}
+                >
+                  Simpan
+                </Button>
+              )}
+            </div>
             <p className="text-[10px] text-muted-foreground leading-tight">Jika diisi, backup akan menimpa file ini. Sangat berguna jika Anda memiliki beberapa cabang agar backup tidak saling tertimpa (tiap cabang beda ID File).</p>
           </div>
           <div className="space-y-2">
@@ -1183,6 +1364,63 @@ export default function Pengaturan() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {/* PIN Verification for actions in Settings */}
+      <PinVerificationDialog
+        open={pinVerifyOpen}
+        onOpenChange={setPinVerifyOpen}
+        onSuccess={() => {
+          if (pinCallbackRef.current) {
+            pinCallbackRef.current();
+            pinCallbackRef.current = null;
+          }
+        }}
+        title={pinVerifyTitle}
+        description={pinVerifyDesc}
+      />
+
+      {/* Security PIN Management Dialog */}
+      <Dialog open={pinManageOpen} onOpenChange={setPinManageOpen}>
+        <DialogContent className="max-w-[400px] w-[90vw] rounded-xl p-6 flex flex-col items-center">
+          <DialogHeader className="items-center text-center w-full">
+            <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mb-3">
+              <KeyRound className="w-6 h-6" />
+            </div>
+            <DialogTitle className="text-base font-bold">
+              {pinManageMode === 'setup' && 'Aktifkan PIN Otorisasi'}
+              {pinManageMode === 'change' && 'Ubah PIN Otorisasi'}
+              {pinManageMode === 'disable' && 'Nonaktifkan PIN Otorisasi'}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-center mt-1">
+              {pinStep === 'verify_old' && 'Masukkan PIN Otorisasi lama Anda untuk memverifikasi.'}
+              {pinStep === 'enter_new' && 'Buat 6 angka PIN Otorisasi baru Anda.'}
+              {pinStep === 'confirm_new' && 'Masukkan kembali 6 angka PIN Otorisasi untuk konfirmasi.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="my-6 flex flex-col items-center gap-2">
+            <InputOTP
+              maxLength={6}
+              value={pinInput}
+              onChange={handlePinManageOTPChange}
+              autoFocus
+              inputMode="numeric"
+              pattern="[0-9]*"
+            >
+              <InputOTPGroup>
+                <InputOTPSlot index={0} className="w-11 h-11 text-lg" />
+                <InputOTPSlot index={1} className="w-11 h-11 text-lg" />
+                <InputOTPSlot index={2} className="w-11 h-11 text-lg" />
+                <InputOTPSlot index={3} className="w-11 h-11 text-lg" />
+                <InputOTPSlot index={4} className="w-11 h-11 text-lg" />
+                <InputOTPSlot index={5} className="w-11 h-11 text-lg" />
+              </InputOTPGroup>
+            </InputOTP>
+            {pinManageError && (
+              <p className="text-xs text-destructive font-medium mt-2">{pinManageError}</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

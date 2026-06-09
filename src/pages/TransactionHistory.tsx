@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import ReceiptDialog from '@/components/Receipt';
+import PinVerificationDialog from '@/components/PinVerificationDialog';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/use-auth';
 
@@ -31,6 +32,7 @@ export default function TransactionHistory() {
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [pinVerifyOpen, setPinVerifyOpen] = useState(false);
   const [restoreStock, setRestoreStock] = useState(true);
   const [filterStatus, setFilterStatus] = useState<'all' | 'completed' | 'open'>('all');
   const [filterCashier, setFilterCashier] = useState<string>('all');
@@ -534,12 +536,29 @@ export default function TransactionHistory() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Batal</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteTransaction} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction onClick={(e) => {
+              e.preventDefault();
+              if (storeSettings?.securityPin) {
+                setDeleteDialogOpen(false);
+                setTimeout(() => setPinVerifyOpen(true), 150);
+              } else {
+                handleDeleteTransaction();
+              }
+            }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               Hapus
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* PIN Verification for Deletion */}
+      <PinVerificationDialog
+        open={pinVerifyOpen}
+        onOpenChange={setPinVerifyOpen}
+        onSuccess={handleDeleteTransaction}
+        title="Verifikasi PIN Otorisasi"
+        description="Masukkan PIN keamanan 6 angka untuk menyetujui penghapusan transaksi."
+      />
     </div>
   );
 }
