@@ -374,9 +374,24 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
         lines.push('--------------------------------\n');
 
         for (const item of items) {
-          lines.push(`\x1B\x45\x01${item.productName}\n\x1B\x45\x00`); // Bold item name
-          if (item.notes) lines.push(`  * ${item.notes}\n`);
-          lines.push(formatLine('  Jumlah:', `x${item.quantity}`) + '\n');
+          const qtyStr = `[${item.quantity}x]`.padEnd(6, ' ');
+          const maxNameWidth = 32 - qtyStr.length;
+          const nameLines = wrapText(item.productName, maxNameWidth);
+          
+          lines.push('\x1B\x45\x01'); // Bold on
+          if (nameLines.length > 0) {
+            lines.push(`${qtyStr}${nameLines[0]}\n`);
+            const padding = ' '.repeat(qtyStr.length);
+            for (let j = 1; j < nameLines.length; j++) {
+              lines.push(`${padding}${nameLines[j]}\n`);
+            }
+          }
+          lines.push('\x1B\x45\x00'); // Bold off
+          if (item.notes) {
+            wrapText(`* Catatan: ${item.notes}`, 30).forEach(noteLine => {
+              lines.push(`  ${noteLine}\n`);
+            });
+          }
         }
         lines.push('--------------------------------\n');
         lines.push('\x1B\x61\x01'); // Center
@@ -617,16 +632,25 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
               <div className="border-t border-dashed border-gray-400 my-2" />
 
               {/* Items */}
-              {items.map((item, i) => (
-                <div key={i} className="mb-2">
-                  <p className="text-[11px] font-bold">{item.productName}</p>
-                  {item.notes && <p className="text-[10px] text-gray-700 font-medium italic">  Catatan: {item.notes}</p>}
-                  <div className="flex justify-between text-[10px] mt-0.5">
-                    <span>Jumlah:</span>
-                    <span className="font-bold text-xs">x{item.quantity}</span>
+              <div className="space-y-2.5">
+                {items.map((item, i) => (
+                  <div key={i} className="text-[11px]">
+                    <div className="flex items-start">
+                      <span className="min-w-[36px] text-[11px] font-bold bg-black text-white rounded px-1.5 py-0.5 text-center mr-2">
+                        {item.quantity}x
+                      </span>
+                      <div className="flex-1">
+                        <p className="font-bold leading-tight">{item.productName}</p>
+                        {item.notes && (
+                          <p className="text-[10px] text-gray-700 font-medium italic mt-0.5">
+                            * Catatan: {item.notes}
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
 
               <div className="border-t border-dashed border-gray-400 my-2" />
               <p className="text-center text-[9px] text-gray-500 italic">Harap periksa pesanan dengan teliti</p>
