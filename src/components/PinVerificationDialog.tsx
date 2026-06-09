@@ -54,12 +54,19 @@ export default function PinVerificationDialog({
         return;
       }
       
-      const hashed = await hashPin(val, storeSettings.deviceId);
-      if (hashed === storeSettings.securityPin) {
-        onSuccess();
-        onOpenChange(false);
-      } else {
-        setError('PIN salah. Silakan coba lagi.');
+      try {
+        const deviceId = storeSettings?.deviceId || '';
+        const hashed = await hashPin(val, deviceId);
+        if (hashed === storeSettings.securityPin) {
+          onSuccess();
+          onOpenChange(false);
+        } else {
+          setError('PIN salah. Silakan coba lagi.');
+          setPin('');
+        }
+      } catch (err: any) {
+        console.error('Error verifying PIN:', err);
+        setError('Gagal memverifikasi PIN.');
         setPin('');
       }
     }

@@ -23,6 +23,7 @@ import { compressImage } from '@/lib/image-utils';
 import { useAuth } from '@/hooks/use-auth';
 import { createUser, hashPin, isValidPin, isValidUsername, saveSession } from '@/lib/auth';
 import { usePWAInstall } from '@/hooks/use-pwa-install';
+import { generateUUID } from '@/lib/utils';
 
 export default function Pengaturan() {
   const reviveDates = (obj: any): any => {
@@ -169,41 +170,76 @@ export default function Pengaturan() {
     setPinManageError('');
 
     if (val.length === 6) {
-      if (pinStep === 'verify_old') {
-        const hashed = await hashPin(val, storeSettings?.deviceId || '');
-        if (hashed === storeSettings?.securityPin) {
-          if (pinManageMode === 'change') {
-            setPinStep('enter_new');
-            setPinInput('');
-          } else if (pinManageMode === 'disable') {
-            if (storeSettings?.id) {
-              await db.storeSettings.update(storeSettings.id, { securityPin: undefined });
+      try {
+        let currentSettings = storeSettings;
+        if (!currentSettings || !currentSettings.id) {
+          currentSettings = await db.storeSettings.toCollection().first();
+        }
+        if (!currentSettings) {
+          const deviceId = generateUUID();
+          const newId = await db.storeSettings.add({
+            storeName: 'Toko Saya',
+            address: '',
+            phone: '',
+            receiptFooter: 'Terima kasih atas kunjungan Anda!',
+            onboardingDone: false,
+            lastBackupAt: null,
+            deviceId: deviceId,
+          });
+          currentSettings = {
+            id: newId,
+            storeName: 'Toko Saya',
+            address: '',
+            phone: '',
+            receiptFooter: 'Terima kasih atas kunjungan Anda!',
+            onboardingDone: false,
+            lastBackupAt: null,
+            deviceId: deviceId,
+          };
+        }
+
+        const deviceId = currentSettings.deviceId || generateUUID();
+        if (!currentSettings.deviceId) {
+          await db.storeSettings.update(currentSettings.id!, { deviceId });
+          currentSettings.deviceId = deviceId;
+        }
+
+        if (pinStep === 'verify_old') {
+          const hashed = await hashPin(val, deviceId);
+          if (hashed === currentSettings.securityPin) {
+            if (pinManageMode === 'change') {
+              setPinStep('enter_new');
+              setPinInput('');
+            } else if (pinManageMode === 'disable') {
+              await db.storeSettings.update(currentSettings.id!, { securityPin: undefined });
               toast.success('PIN Otorisasi berhasil dinonaktifkan');
               setPinManageOpen(false);
             }
+          } else {
+            setPinManageError('PIN lama salah');
+            setPinInput('');
           }
-        } else {
-          setPinManageError('PIN lama salah');
+        } else if (pinStep === 'enter_new') {
+          setTempNewPin(val);
+          setPinStep('confirm_new');
           setPinInput('');
-        }
-      } else if (pinStep === 'enter_new') {
-        setTempNewPin(val);
-        setPinStep('confirm_new');
-        setPinInput('');
-      } else if (pinStep === 'confirm_new') {
-        if (val === tempNewPin) {
-          if (storeSettings?.id) {
-            const hashed = await hashPin(val, storeSettings.deviceId);
-            await db.storeSettings.update(storeSettings.id, { securityPin: hashed });
+        } else if (pinStep === 'confirm_new') {
+          if (val === tempNewPin) {
+            const hashed = await hashPin(val, deviceId);
+            await db.storeSettings.update(currentSettings.id!, { securityPin: hashed });
             toast.success(pinManageMode === 'setup' ? 'PIN Otorisasi berhasil diaktifkan' : 'PIN Otorisasi berhasil diubah');
             setPinManageOpen(false);
+          } else {
+            setPinManageError('Konfirmasi PIN tidak cocok. Silakan ulangi.');
+            setPinInput('');
+            setPinStep('enter_new');
+            setTempNewPin('');
           }
-        } else {
-          setPinManageError('Konfirmasi PIN tidak cocok. Silakan ulangi.');
-          setPinInput('');
-          setPinStep('enter_new');
-          setTempNewPin('');
         }
+      } catch (err: any) {
+        console.error('Error handling PIN management:', err);
+        setPinManageError('Gagal memproses PIN');
+        toast.error('Gagal memproses PIN: ' + (err.message || err));
       }
     }
   };
@@ -1399,6 +1435,7 @@ export default function Pengaturan() {
 
           <div className="my-6 flex flex-col items-center gap-2">
             <InputOTP
+              key={pinStep}
               maxLength={6}
               value={pinInput}
               onChange={handlePinManageOTPChange}
