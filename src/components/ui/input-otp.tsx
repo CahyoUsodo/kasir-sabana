@@ -34,12 +34,15 @@ const InputOTPSlot = React.forwardRef<
       setIsMasked(false);
       const timer = setTimeout(() => {
         setIsMasked(true);
-      }, 800);
+      }, 300);
       return () => clearTimeout(timer);
     } else {
       setIsMasked(true);
     }
   }, [char]);
+
+  const hasNextValue = inputOTPContext.slots.slice(index + 1).some(s => !!s.char);
+  const shouldMask = type === "password" && char && (isMasked || hasNextValue);
 
   return (
     <div
@@ -51,12 +54,8 @@ const InputOTPSlot = React.forwardRef<
       )}
       {...props}
     >
-      {type === "password" && char ? (
-        isMasked ? (
-          <div className="h-2 w-2 rounded-full bg-foreground" />
-        ) : (
-          char
-        )
+      {shouldMask ? (
+        <div className="h-2 w-2 rounded-full bg-foreground" />
       ) : (
         char
       )}
