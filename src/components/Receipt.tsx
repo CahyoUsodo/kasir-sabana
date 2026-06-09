@@ -373,7 +373,8 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
         }
         lines.push('--------------------------------\n');
 
-        for (const item of items) {
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
           const qtyStr = `[${item.quantity}x]`.padEnd(6, ' ');
           const maxNameWidth = 32 - qtyStr.length;
           const nameLines = wrapText(item.productName, maxNameWidth);
@@ -391,6 +392,9 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
             wrapText(`* Catatan: ${item.notes}`, 30).forEach(noteLine => {
               lines.push(`  ${noteLine}\n`);
             });
+          }
+          if (i < items.length - 1) {
+            lines.push('\n');
           }
         }
         lines.push('--------------------------------\n');
@@ -632,7 +636,7 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
               <div className="border-t border-dashed border-gray-400 my-2" />
 
               {/* Items */}
-              <div className="space-y-2.5">
+              <div className="space-y-4">
                 {items.map((item, i) => (
                   <div key={i} className="text-[11px]">
                     <div className="flex items-start">
