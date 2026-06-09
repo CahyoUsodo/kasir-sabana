@@ -322,13 +322,18 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
 
         lines.push('--------------------------------\n');
         
-        for (const item of items) {
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
           lines.push(`${item.productName}\n`);
           if (item.notes) lines.push(`  ${item.notes}\n`);
           
           const qtyPrice = `  ${item.quantity} x Rp ${item.price.toLocaleString('id-ID')}`;
           const subtotalStr = `Rp ${item.subtotal.toLocaleString('id-ID')}`;
           lines.push(formatLine(qtyPrice, subtotalStr) + '\n');
+
+          if (i < items.length - 1) {
+            lines.push('\n');
+          }
         }
         
         lines.push('--------------------------------\n');
@@ -538,7 +543,7 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
 
               {/* Items */}
               {items.map((item, i) => (
-                <div key={i} className="mb-1">
+                <div key={i} className="mb-3">
                   <p className="text-[11px] font-medium">{item.productName}</p>
                   {item.notes && <p className="text-[9px] text-gray-500 italic">  {item.notes}</p>}
                   <div className="flex justify-between text-[10px]">
