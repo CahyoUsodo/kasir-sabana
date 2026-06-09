@@ -49,8 +49,13 @@ export default function PinVerificationDialog({
     if (val.length === 6) {
       if (!storeSettings?.securityPin) {
         // Fallback: if somehow PIN is not set, allow
-        onSuccess();
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
         onOpenChange(false);
+        setTimeout(() => {
+          onSuccess();
+        }, 150);
         return;
       }
       
@@ -58,8 +63,13 @@ export default function PinVerificationDialog({
         const deviceId = storeSettings?.deviceId || '';
         const hashed = await hashPin(val, deviceId);
         if (hashed === storeSettings.securityPin) {
-          onSuccess();
+          if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+          }
           onOpenChange(false);
+          setTimeout(() => {
+            onSuccess();
+          }, 150);
         } else {
           setError('PIN salah. Silakan coba lagi.');
           setPin('');

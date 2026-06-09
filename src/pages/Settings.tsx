@@ -211,9 +211,20 @@ export default function Pengaturan() {
               setPinStep('enter_new');
               setPinInput('');
             } else if (pinManageMode === 'disable') {
-              await db.storeSettings.update(currentSettings.id!, { securityPin: undefined });
-              toast.success('PIN Otorisasi berhasil dinonaktifkan');
+              if (document.activeElement instanceof HTMLElement) {
+                document.activeElement.blur();
+              }
               setPinManageOpen(false);
+              const settingsId = currentSettings.id!;
+              setTimeout(async () => {
+                try {
+                  await db.storeSettings.update(settingsId, { securityPin: undefined });
+                  toast.success('PIN Otorisasi berhasil dinonaktifkan');
+                } catch (err: any) {
+                  console.error('Error disabling PIN:', err);
+                  toast.error('Gagal menonaktifkan PIN');
+                }
+              }, 150);
             }
           } else {
             setPinManageError('PIN lama salah');
@@ -225,10 +236,22 @@ export default function Pengaturan() {
           setPinInput('');
         } else if (pinStep === 'confirm_new') {
           if (val === tempNewPin) {
-            const hashed = await hashPin(val, deviceId);
-            await db.storeSettings.update(currentSettings.id!, { securityPin: hashed });
-            toast.success(pinManageMode === 'setup' ? 'PIN Otorisasi berhasil diaktifkan' : 'PIN Otorisasi berhasil diubah');
+            if (document.activeElement instanceof HTMLElement) {
+              document.activeElement.blur();
+            }
             setPinManageOpen(false);
+            const settingsId = currentSettings.id!;
+            const mode = pinManageMode;
+            setTimeout(async () => {
+              try {
+                const hashed = await hashPin(val, deviceId);
+                await db.storeSettings.update(settingsId, { securityPin: hashed });
+                toast.success(mode === 'setup' ? 'PIN Otorisasi berhasil diaktifkan' : 'PIN Otorisasi berhasil diubah');
+              } catch (err: any) {
+                console.error('Error updating PIN:', err);
+                toast.error('Gagal menyimpan PIN baru');
+              }
+            }, 150);
           } else {
             setPinManageError('Konfirmasi PIN tidak cocok. Silakan ulangi.');
             setPinInput('');
