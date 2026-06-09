@@ -27,6 +27,34 @@ const formatLine = (left: string, right: string, width: number = 32): string => 
   return left + ' ' + right;
 };
 
+// Helper to wrap text into lines of max width without cutting words
+const wrapText = (text: string, maxWidth: number = 32): string[] => {
+  const paragraphs = text.split('\n');
+  const allLines: string[] = [];
+  
+  for (const para of paragraphs) {
+    const words = para.split(' ');
+    let currentLine = '';
+    
+    for (const word of words) {
+      if (!word) continue;
+      const testLine = currentLine ? `${currentLine} ${word}` : word;
+      if (testLine.length <= maxWidth) {
+        currentLine = testLine;
+      } else {
+        if (currentLine) {
+          allLines.push(currentLine);
+        }
+        currentLine = word;
+      }
+    }
+    if (currentLine) {
+      allLines.push(currentLine);
+    }
+  }
+  return allLines;
+};
+
 // Helper to convert base64 image data to ESC/POS raster image command
 const getEscPosImage = (base64Data: string, targetWidth: number = 160): Promise<Uint8Array | null> => {
   return new Promise((resolve) => {
@@ -212,18 +240,27 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
       const lines: string[] = [];
       
       lines.push('\x1B\x61\x01'); // Center align
-      lines.push(`${storeSettings?.storeName || 'Toko'}\n`);
-      if (storeSettings?.address) lines.push(`${storeSettings.address}\n`);
-      if (storeSettings?.phone) lines.push(`${storeSettings.phone}\n`);
+      const storeName = storeSettings?.storeName || 'Toko';
+      wrapText(storeName, 32).forEach(line => lines.push(line + '\n'));
+      if (storeSettings?.address) {
+        wrapText(storeSettings.address, 32).forEach(line => lines.push(line + '\n'));
+      }
+      if (storeSettings?.phone) {
+        wrapText(storeSettings.phone, 32).forEach(line => lines.push(line + '\n'));
+      }
       lines.push('--------------------------------\n');
       
       lines.push('\x1B\x61\x00'); // Left align
       lines.push(`No: ${transaction.receiptNumber}\n`);
       lines.push(formatLine(format(new Date(transaction.date), 'dd/MM/yyyy HH:mm'), paymentMethodName) + '\n');
       if (cashierName) lines.push(`Kasir: ${cashierName}\n`);
-      if (transaction.customerName) lines.push(`Pelanggan: ${transaction.customerName}\n`);
+      if (transaction.customerName) {
+        wrapText(`Pelanggan: ${transaction.customerName}`, 32).forEach(line => lines.push(line + '\n'));
+      }
       if (transaction.tableNumber) lines.push(`Meja: ${transaction.tableNumber}\n`);
-      if (transaction.remarks) lines.push(`Catatan: ${transaction.remarks}\n`);
+      if (transaction.remarks) {
+        wrapText(`Catatan: ${transaction.remarks}`, 32).forEach(line => lines.push(line + '\n'));
+      }
       lines.push('--------------------------------\n');
       
       for (const item of items) {
@@ -246,7 +283,9 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
       lines.push('--------------------------------\n');
       
       lines.push('\x1B\x61\x01'); // Center
-      lines.push(`${storeSettings?.receiptFooter || 'Terima kasih!'}\n\n\n\n`);
+      const footerText = storeSettings?.receiptFooter || 'Terima kasih!';
+      wrapText(footerText, 32).forEach(line => lines.push(line + '\n'));
+      lines.push('\n\n\n'); // Spacing to feed paper
 
       const textData = encoder.encode(lines.join(''));
       
