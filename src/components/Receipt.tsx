@@ -18,6 +18,84 @@ interface ReceiptProps {
   cashierName?: string; // optional — shown only when multi-user is on
 }
 
+// Helper to format line with left and right columns aligned to 32 characters
+const formatLine = (left: string, right: string, width: number = 32): string => {
+  const spacesNeeded = width - (left.length + right.length);
+  if (spacesNeeded > 0) {
+    return left + ' '.repeat(spacesNeeded) + right;
+  }
+  return left + ' ' + right;
+};
+
+// Helper to convert base64 image data to ESC/POS raster image command
+const getEscPosImage = (base64Data: string, targetWidth: number = 160): Promise<Uint8Array | null> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = targetWidth / img.width;
+      const targetHeight = Math.round(img.height * scale);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(null);
+        return;
+      }
+
+      ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+      const imgData = ctx.getImageData(0, 0, targetWidth, targetHeight);
+      const pixels = imgData.data;
+
+      const widthBytes = Math.ceil(targetWidth / 8);
+      const buffer = new Uint8Array(8 + widthBytes * targetHeight);
+      
+      buffer[0] = 0x1D; // GS
+      buffer[1] = 0x76; // v
+      buffer[2] = 0x30; // 0
+      buffer[3] = 0;    // m
+      buffer[4] = widthBytes % 256;
+      buffer[5] = Math.floor(widthBytes / 256);
+      buffer[6] = targetHeight % 256;
+      buffer[7] = Math.floor(targetHeight / 256);
+
+      let offset = 8;
+      for (let y = 0; y < targetHeight; y++) {
+        for (let x = 0; x < widthBytes; x++) {
+          let byteVal = 0;
+          for (let bit = 0; bit < 8; bit++) {
+            const pxX = x * 8 + bit;
+            if (pxX < targetWidth) {
+              const pxIndex = (y * targetWidth + pxX) * 4;
+              const r = pixels[pxIndex];
+              const g = pixels[pxIndex + 1];
+              const b = pixels[pxIndex + 2];
+              const a = pixels[pxIndex + 3];
+              
+              let isBlack = false;
+              if (a >= 128) {
+                const grey = 0.299 * r + 0.587 * g + 0.114 * b;
+                isBlack = grey < 128;
+              }
+              
+              if (isBlack) {
+                byteVal |= (1 << (7 - bit));
+              }
+            }
+          }
+          buffer[offset++] = byteVal;
+        }
+      }
+      resolve(buffer);
+    };
+    img.onerror = () => {
+      resolve(null);
+    };
+    img.src = base64Data;
+  });
+};
+
 export default function Receipt({ open, onClose, transaction, items, storeSettings, paymentMethodName, cashierName }: ReceiptProps) {
   const receiptRef = useRef<HTMLDivElement>(null);
   const [generating, setGenerating] = useState(false);
@@ -87,16 +165,47 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
     }
 
     try {
-      toast.info('Mencari printer Bluetooth...');
-      // @ts-expect-error Web Bluetooth API is not fully typed in TypeScript
-      const device = await navigator.bluetooth.requestDevice({
-        filters: [{ services: ['000018f0-0000-1000-8000-00805f9b34fb'] }],
-        optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb'],
-      });
+      let device: any;
+      
+      // Auto-connect to previously paired device if supported and saved
+      if ('getDevices' in navigator.bluetooth) {
+        // @ts-expect-error Web Bluetooth API getDevices is not fully typed
+        const pairedDevices = await navigator.bluetooth.getDevices();
+        const preferredId = localStorage.getItem('preferredPrinterId');
+        if (preferredId) {
+          device = pairedDevices.find((d: any) => d.id === preferredId);
+        }
+        if (!device && pairedDevices.length > 0) {
+          device = pairedDevices[0];
+        }
+      }
+
+      // If no paired device found, prompt picker
+      if (!device) {
+        toast.info('Mencari printer Bluetooth...');
+        // @ts-expect-error Web Bluetooth API is not fully typed in TypeScript
+        device = await navigator.bluetooth.requestDevice({
+          filters: [{ services: ['000018f0-0000-1000-8000-00805f9b34fb'] }],
+          optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb'],
+        });
+        if (device) {
+          localStorage.setItem('preferredPrinterId', device.id);
+        }
+      }
 
       const server = await device.gatt.connect();
       const service = await server.getPrimaryService('000018f0-0000-1000-8000-00805f9b34fb');
       const characteristic = await service.getCharacteristic('00002af1-0000-1000-8000-00805f9b34fb');
+
+      // Convert logo to ESC/POS raster image
+      let logoBuffer: Uint8Array | null = null;
+      if (storeSettings?.logo) {
+        try {
+          logoBuffer = await getEscPosImage(storeSettings.logo, 160);
+        } catch (e) {
+          console.error('Error loading logo:', e);
+        }
+      }
 
       // Build ESC/POS text
       const encoder = new TextEncoder();
@@ -107,45 +216,69 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
       if (storeSettings?.address) lines.push(`${storeSettings.address}\n`);
       if (storeSettings?.phone) lines.push(`${storeSettings.phone}\n`);
       lines.push('--------------------------------\n');
+      
+      lines.push('\x1B\x61\x00'); // Left align
       lines.push(`No: ${transaction.receiptNumber}\n`);
-      lines.push(`${format(new Date(transaction.date), 'dd/MM/yyyy HH:mm')}\n`);
+      lines.push(formatLine(format(new Date(transaction.date), 'dd/MM/yyyy HH:mm'), paymentMethodName) + '\n');
       if (cashierName) lines.push(`Kasir: ${cashierName}\n`);
       if (transaction.customerName) lines.push(`Pelanggan: ${transaction.customerName}\n`);
       if (transaction.tableNumber) lines.push(`Meja: ${transaction.tableNumber}\n`);
       if (transaction.remarks) lines.push(`Catatan: ${transaction.remarks}\n`);
       lines.push('--------------------------------\n');
       
-      lines.push('\x1B\x61\x00'); // Left align
       for (const item of items) {
         lines.push(`${item.productName}\n`);
         if (item.notes) lines.push(`  ${item.notes}\n`);
-        lines.push(`  ${item.quantity} x Rp ${item.price.toLocaleString('id-ID')}  Rp ${item.subtotal.toLocaleString('id-ID')}\n`);
+        
+        const qtyPrice = `  ${item.quantity} x Rp ${item.price.toLocaleString('id-ID')}`;
+        const subtotalStr = `Rp ${item.subtotal.toLocaleString('id-ID')}`;
+        lines.push(formatLine(qtyPrice, subtotalStr) + '\n');
       }
       
       lines.push('--------------------------------\n');
-      lines.push(`Subtotal:  Rp ${transaction.subtotal.toLocaleString('id-ID')}\n`);
+      lines.push(formatLine('Subtotal:', `Rp ${transaction.subtotal.toLocaleString('id-ID')}`) + '\n');
       if (transaction.discountAmount > 0) {
-        lines.push(`Diskon:   -Rp ${transaction.discountAmount.toLocaleString('id-ID')}\n`);
+        lines.push(formatLine('Diskon:', `-Rp ${transaction.discountAmount.toLocaleString('id-ID')}`) + '\n');
       }
-      lines.push(`TOTAL:     Rp ${transaction.total.toLocaleString('id-ID')}\n`);
-      lines.push(`Bayar:     Rp ${transaction.paymentAmount.toLocaleString('id-ID')}\n`);
-      lines.push(`Kembali:   Rp ${transaction.change.toLocaleString('id-ID')}\n`);
+      lines.push(formatLine('TOTAL:', `Rp ${transaction.total.toLocaleString('id-ID')}`) + '\n');
+      lines.push(formatLine('Bayar:', `Rp ${transaction.paymentAmount.toLocaleString('id-ID')}`) + '\n');
+      lines.push(formatLine('Kembali:', `Rp ${transaction.change.toLocaleString('id-ID')}`) + '\n');
       lines.push('--------------------------------\n');
-      lines.push('\x1B\x61\x01'); // Center
-      lines.push(`${storeSettings?.receiptFooter || 'Terima kasih!'}\n\n\n`);
-
-      const data = encoder.encode(lines.join(''));
       
-      // Send in chunks of 100 bytes
-      for (let i = 0; i < data.length; i += 100) {
-        const chunk = data.slice(i, i + 100);
+      lines.push('\x1B\x61\x01'); // Center
+      lines.push(`${storeSettings?.receiptFooter || 'Terima kasih!'}\n\n\n\n`);
+
+      const textData = encoder.encode(lines.join(''));
+      
+      // Combine initialization, logo, and text data
+      const initCommands = new Uint8Array([0x1B, 0x40, 0x1B, 0x61, 0x01]); // ESC @ (Init) + ESC a 1 (Center)
+      let data: Uint8Array;
+      if (logoBuffer) {
+        data = new Uint8Array(initCommands.length + logoBuffer.length + 1 + textData.length);
+        data.set(initCommands, 0);
+        data.set(logoBuffer, initCommands.length);
+        data[initCommands.length + logoBuffer.length] = 0x0A; // Line Feed (flush/feed raster image)
+        data.set(textData, initCommands.length + logoBuffer.length + 1);
+      } else {
+        data = new Uint8Array(initCommands.length + textData.length);
+        data.set(initCommands, 0);
+        data.set(textData, initCommands.length);
+      }
+      
+      // Send in chunks of 20 bytes with 20ms delay to prevent buffer overflow in BLE write
+      const chunkSize = 20;
+      for (let i = 0; i < data.length; i += chunkSize) {
+        const chunk = data.slice(i, i + chunkSize);
         await characteristic.writeValue(chunk);
+        await new Promise((resolve) => setTimeout(resolve, 20));
       }
 
       toast.success('Struk berhasil dicetak!');
       await server.disconnect();
     } catch (err: unknown) {
       if (err instanceof Error && err.name !== 'NotFoundError') {
+        // Clear the preferred printer ID if connection fails so user can choose again
+        localStorage.removeItem('preferredPrinterId');
         toast.error('Gagal mencetak. Pastikan printer Bluetooth menyala.');
       }
     }
