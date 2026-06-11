@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Product, type Category } from '@/lib/db';
+import { db, type Product, type Category, autoLinkChickenRecipes } from '@/lib/db';
 import { useState, useRef } from 'react';
 import { Plus, Search, Edit2, Trash2, Package as PackageIcon, Camera, X, Copy } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -42,6 +42,8 @@ export default function Produk() {
   const products = useLiveQuery(() => db.products.where('isDeleted').equals(0).toArray());
   const categories = useLiveQuery(() => db.categories.where('isDeleted').equals(0).toArray());
   const units = useLiveQuery(() => db.units.where('isDeleted').equals(0).toArray());
+  const productRecipes = useLiveQuery(() => db.productRecipes.toArray());
+  const visibleWarehouseItems = useLiveQuery(() => db.warehouseItems.where('isDeleted').equals(0).toArray());
 
   // Compose dropdown options: active master units + current product's unit if it has been deleted/renamed
   const unitOptions = (() => {
@@ -50,7 +52,9 @@ export default function Produk() {
     return names;
   })();
 
-  const filtered = products?.filter(p => {
+  const isLinkedToRecipe = editProduct ? (productRecipes?.some(r => r.productId === editProduct.id) ?? false) : false;
+
+  const rawFiltered = products?.filter(p => {
     const q = search.toLowerCase();
     const matchSearch =
       p.name.toLowerCase().includes(q) ||
@@ -60,8 +64,35 @@ export default function Produk() {
     return matchSearch && matchCategory;
   }) ?? [];
 
+  const filtered = rawFiltered.map(p => {
+    const recipes = productRecipes?.filter(r => r.productId === p.id) ?? [];
+    if (recipes.length > 0) {
+      let minStock = Infinity;
+      const todayStr = new Date().toLocaleDateString('en-CA');
+      for (const recipe of recipes) {
+        const whItem = visibleWarehouseItems?.find(wi => wi.id === recipe.warehouseItemId);
+        if (whItem) {
+          const isResetToday = whItem.isDailyReset === 1 && whItem.lastPreparedDate !== todayStr;
+          const effectiveStock = isResetToday ? 0 : whItem.stock;
+          const available = Math.floor(effectiveStock / recipe.quantity);
+          if (available < minStock) {
+            minStock = available;
+          }
+        } else {
+          minStock = 0;
+        }
+      }
+      return {
+        ...p,
+        stock: minStock === Infinity ? 0 : minStock
+      };
+    }
+    return p;
+  });
+
   const getCategoryName = (catId: number) => categories?.find(c => c.id === catId)?.name ?? '-';
   const getCategoryColor = (catId: number) => categories?.find(c => c.id === catId)?.color ?? '#999';
+
 
   const openAdd = () => {
     setEditProduct(null);
@@ -132,6 +163,7 @@ export default function Produk() {
         deletedAt: null,
       } as Product);
     }
+    await autoLinkChickenRecipes();
     setDialogOpen(false);
   };
 

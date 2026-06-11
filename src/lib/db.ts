@@ -561,11 +561,62 @@ export async function seedDefaultData() {
       lastBackupAt: null,
       deviceId: generateUUID(),
     });
-  } else {
     // Fallback: if storeSettings exists but has no deviceId, generate one
     const settings = await db.storeSettings.toCollection().first();
     if (settings && !settings.deviceId) {
       await db.storeSettings.update(settings.id!, { deviceId: generateUUID() });
     }
   }
+
+  // Auto-link chicken products to warehouse items if not already linked
+  await autoLinkChickenRecipes();
 }
+
+export async function autoLinkChickenRecipes() {
+  const products = await db.products.where('isDeleted').equals(0).toArray();
+  const whItems = await db.warehouseItems.where('isDeleted').equals(0).toArray();
+  const recipes = await db.productRecipes.toArray();
+
+  for (const p of products) {
+    const pName = p.name.toLowerCase();
+    const pDesc = (p.description || '').toLowerCase();
+    const pSku = p.sku.toLowerCase();
+
+    let matchedWhItemName: string | null = null;
+    if (pName.includes('paha bawah') || pDesc.includes('paha bawah') || pSku.includes('pb')) {
+      matchedWhItemName = 'Paha Bawah';
+    } else if (pName.includes('paha atas') || pDesc.includes('paha atas') || pSku.includes('pa')) {
+      matchedWhItemName = 'Paha Atas';
+    } else if (pName.includes('sayap') || pDesc.includes('sayap') || pSku.includes('syp')) {
+      matchedWhItemName = 'Sayap';
+    } else if (pName.includes('dada') || pDesc.includes('dada') || pSku.includes('dd')) {
+      matchedWhItemName = 'Dada';
+    }
+
+    if (matchedWhItemName) {
+      const whItem = whItems.find(item => item.name.toLowerCase() === matchedWhItemName!.toLowerCase());
+      if (whItem) {
+        // Check if this specific link already exists
+        const hasSpecificRecipe = recipes.some(r => r.productId === p.id && r.warehouseItemId === whItem.id);
+        if (!hasSpecificRecipe) {
+          // Check if there are other recipes for this product that link to DIFFERENT chicken items, and delete them
+          const chickenWhItemIds = whItems
+            .filter(item => ['paha bawah', 'paha atas', 'sayap', 'dada'].includes(item.name.toLowerCase()))
+            .map(item => item.id!);
+          
+          const wrongChickenRecipes = recipes.filter(r => r.productId === p.id && chickenWhItemIds.includes(r.warehouseItemId) && r.warehouseItemId !== whItem.id);
+          for (const wr of wrongChickenRecipes) {
+            await db.productRecipes.delete(wr.id!);
+          }
+
+          await db.productRecipes.add({
+            productId: p.id!,
+            warehouseItemId: whItem.id!,
+            quantity: 1
+          });
+        }
+      }
+    }
+  }
+}
+

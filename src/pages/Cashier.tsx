@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Product, type Category, type Transaction, type TransactionItemRecord, adjustWarehouseStock } from '@/lib/db';
+import { db, type Product, type Category, type Transaction, type TransactionItemRecord, adjustWarehouseStock, autoLinkChickenRecipes } from '@/lib/db';
 import { useState, useRef, useEffect } from 'react';
 import { Search, Plus, Minus, ShoppingCart, X, Percent, Tag, CreditCard, Banknote, Check, Package as PackageIcon, ClipboardList, Save, Pencil, User, Hash, Trash2, Utensils, ShoppingBag } from 'lucide-react';
 import Receipt from '@/components/Receipt';
@@ -169,6 +169,10 @@ export default function Kasir() {
   };
 
   useEffect(() => {
+    autoLinkChickenRecipes();
+  }, []);
+
+  useEffect(() => {
     if (editTxIdParam) {
       const txId = Number(editTxIdParam);
       if (!isNaN(txId) && txId !== editingTxId) {
@@ -253,10 +257,13 @@ export default function Kasir() {
       const recipes = productRecipes?.filter(r => r.productId === p.id) ?? [];
       if (recipes.length > 0) {
         let minStock = Infinity;
+        const todayStr = new Date().toLocaleDateString('en-CA');
         for (const recipe of recipes) {
           const whItem = visibleWarehouseItems?.find(wi => wi.id === recipe.warehouseItemId);
           if (whItem) {
-            const available = Math.floor(whItem.stock / recipe.quantity);
+            const isResetToday = whItem.isDailyReset === 1 && whItem.lastPreparedDate !== todayStr;
+            const effectiveStock = isResetToday ? 0 : whItem.stock;
+            const available = Math.floor(effectiveStock / recipe.quantity);
             if (available < minStock) {
               minStock = available;
             }
