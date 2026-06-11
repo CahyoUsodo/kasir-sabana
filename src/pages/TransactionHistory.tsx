@@ -3,7 +3,7 @@ import { db, type Transaction, type TransactionItemRecord } from '@/lib/db';
 import { useState, useEffect } from 'react';
 import { format, startOfDay, endOfDay } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
-import { ArrowLeft, Search, Receipt as ReceiptIcon, Calendar, ChevronRight, ShoppingBag, CalendarIcon, X, Trash2, ShoppingCart, UserCircle2 } from 'lucide-react';
+import { ArrowLeft, Search, Receipt as ReceiptIcon, Calendar, ChevronRight, ShoppingBag, CalendarIcon, X, Trash2, ShoppingCart, UserCircle2, Pencil } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -326,13 +326,25 @@ export default function TransactionHistory() {
                         {tx.status === 'open' ? <ShoppingCart className="w-4 h-4" /> : <ReceiptIcon className="w-4 h-4" />}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <p className="text-xs font-mono text-muted-foreground truncate">{tx.receiptNumber}</p>
                             {tx.status === 'open' ? (
                               <Badge variant="secondary" className="text-[9px] h-4 px-1.5 bg-warning/20 text-warning border-warning/30">Open</Badge>
                             ) : (
                               <Badge variant="secondary" className="text-[9px] h-4 px-1.5 bg-success/20 text-success border-success/30">Lunas</Badge>
+                            )}
+                            {tx.serviceType && (
+                              <Badge 
+                                variant="secondary" 
+                                className={cn(
+                                  "text-[9px] h-4 px-1.5 border",
+                                  tx.serviceType === 'take_away' 
+                                    ? "bg-orange-500/10 text-orange-500 border-orange-500/20" 
+                                    : "bg-blue-500/10 text-blue-500 border-blue-500/20"
+                                )}
+                              >
+                                {tx.serviceType === 'take_away' ? 'Take Away' : 'Dine In'}
+                              </Badge>
                             )}
                           </div>
                           <p className="text-xs text-muted-foreground">{format(new Date(tx.date), 'HH:mm')}</p>
@@ -346,6 +358,11 @@ export default function TransactionHistory() {
                             </span>
                           )}
                           {tx.customerName && <span>👤 {tx.customerName}</span>}
+                          {tx.serviceType && (
+                            <span>
+                              {tx.serviceType === 'take_away' ? '🥡 Take Away' : '🍽️ Dine In'}
+                            </span>
+                          )}
                           {tx.tableNumber && <span>Meja {tx.tableNumber}</span>}
                           {tx.remarks && <span>📝 {tx.remarks}</span>}
                         </div>
@@ -403,6 +420,12 @@ export default function TransactionHistory() {
                    <div className="flex justify-between text-xs">
                      <span className="text-muted-foreground">Pelanggan</span>
                      <span>👤 {selectedTx.customerName}</span>
+                   </div>
+                 )}
+                 {selectedTx.serviceType && (
+                   <div className="flex justify-between text-xs">
+                     <span className="text-muted-foreground">Tipe Layanan</span>
+                     <span>{selectedTx.serviceType === 'take_away' ? '🥡 Take Away' : '🍽️ Dine In'}</span>
                    </div>
                  )}
                  {selectedTx.tableNumber && (
@@ -474,15 +497,34 @@ export default function TransactionHistory() {
               </div>
 
               {selectedTx.status === 'open' ? (
-                <Button className="w-full h-11" onClick={() => { setDetailOpen(false); navigate('/cashier'); }}>
-                  <ShoppingCart className="w-4 h-4 mr-2" />
-                  Lanjutkan di Kasir
+                <Button 
+                  className="w-full h-11" 
+                  onClick={() => { 
+                    setDetailOpen(false); 
+                    navigate(`/cashier?editTxId=${selectedTx.id}`); 
+                  }}
+                >
+                  <Pencil className="w-4 h-4 mr-2" />
+                  Edit Transaksi (Open Bill)
                 </Button>
               ) : (
-                <Button className="w-full h-11" onClick={openReceipt}>
-                  <ReceiptIcon className="w-4 h-4 mr-2" />
-                  Lihat & Cetak Struk
-                </Button>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button className="h-11" onClick={openReceipt}>
+                    <ReceiptIcon className="w-4 h-4 mr-2" />
+                    Struk
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    className="h-11 border-primary/30 text-primary hover:bg-primary/5"
+                    onClick={() => { 
+                      setDetailOpen(false); 
+                      navigate(`/cashier?editTxId=${selectedTx.id}`); 
+                    }}
+                  >
+                    <Pencil className="w-4 h-4 mr-2" />
+                    Edit Transaksi
+                  </Button>
+                </div>
               )}
 
               <Button

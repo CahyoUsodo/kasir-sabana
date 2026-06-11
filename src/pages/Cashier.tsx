@@ -1,8 +1,9 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Product, type Category, type Transaction, type TransactionItemRecord } from '@/lib/db';
 import { useState, useRef, useEffect } from 'react';
-import { Search, Plus, Minus, ShoppingCart, X, Percent, Tag, CreditCard, Banknote, Check, Package as PackageIcon, ClipboardList, Save, Pencil, User, Hash, Trash2 } from 'lucide-react';
+import { Search, Plus, Minus, ShoppingCart, X, Percent, Tag, CreditCard, Banknote, Check, Package as PackageIcon, ClipboardList, Save, Pencil, User, Hash, Trash2, Utensils, ShoppingBag } from 'lucide-react';
 import Receipt from '@/components/Receipt';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -29,11 +30,19 @@ interface CartItem {
 
 export default function Kasir() {
   const { currentUser, can } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const editTxIdParam = searchParams.get('editTxId');
 
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [editingTxId, setEditingTxId] = useState<number | null>(null);
+  const [originalQuantities, setOriginalQuantities] = useState<Record<number, number>>({});
+  const [originalTx, setOriginalTx] = useState<Transaction | null>(null);
+  const [originalItems, setOriginalItems] = useState<TransactionItemRecord[]>([]);
+  const [serviceType, setServiceType] = useState<'dine_in' | 'take_away'>('dine_in');
+
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [txDiscountType, setTxDiscountType] = useState<'percentage' | 'nominal' | null>(null);
@@ -61,7 +70,6 @@ export default function Kasir() {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelTargetTx, setCancelTargetTx] = useState<Transaction | null>(null);
 
-
   const products = useLiveQuery(() => db.products.where('isDeleted').equals(0).toArray());
   const categories = useLiveQuery(() => db.categories.where('isDeleted').equals(0).toArray());
   const paymentMethods = useLiveQuery(() => db.paymentMethods.toArray());
@@ -73,17 +81,97 @@ export default function Kasir() {
   // intact. All hooks above run unconditionally; we just swap the rendered tree.
   const allowed = can('create_transaction');
 
+  const loadTransactionForEditing = async (txId: number) => {
+    try {
+      const tx = await db.transactions.get(txId);
+      if (!tx) {
+        toast.error('Transaksi tidak ditemukan');
+        doFullReset();
+        return;
+      }
+      const items = await db.transactionItems.where('transactionId').equals(txId).toArray();
+      const allProducts = await db.products.toArray(); // load all products
+
+      const cartItems: CartItem[] = [];
+      const qtyMap: Record<number, number> = {};
+
+      for (const item of items) {
+        let product = allProducts.find(p => p.id === item.productId);
+        if (!product) {
+          product = {
+            id: item.productId,
+            name: item.productName,
+            sku: '',
+            categoryId: 0,
+            price: item.price,
+            hpp: item.hpp,
+            stock: 0,
+            unit: 'pcs',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            isDeleted: 1,
+            deletedAt: new Date()
+          };
+        }
+        cartItems.push({
+          product,
+          qty: item.quantity,
+          discountType: item.discountType as 'percentage' | 'nominal' | null,
+          discountValue: item.discountValue,
+          notes: item.notes,
+        });
+        qtyMap[item.productId] = item.quantity;
+      }
+
+      setCart(cartItems);
+      setEditingTxId(txId);
+      setOriginalTx(tx);
+      setOriginalItems(items);
+      setOriginalQuantities(qtyMap);
+      setTxDiscountType(tx.discountType);
+      setTxDiscountValue(tx.discountType ? String(tx.discountValue) : '');
+      setCustomerName(tx.customerName || '');
+      setTableNumber(tx.tableNumber || '');
+      setRemarks(tx.remarks || '');
+      setServiceType(tx.serviceType || 'dine_in');
+      setOpenBillsOpen(false);
+      setCartOpen(true);
+    } catch (err) {
+      console.error(err);
+      toast.error('Gagal memuat transaksi');
+    }
+  };
+
+  useEffect(() => {
+    if (editTxIdParam) {
+      const txId = Number(editTxIdParam);
+      if (!isNaN(txId) && txId !== editingTxId) {
+        loadTransactionForEditing(txId);
+      }
+    } else {
+      if (editingTxId !== null) {
+        doFullReset();
+      }
+    }
+  }, [editTxIdParam]);
+
   const cartProductIds = new Set(cart.map(c => c.product.id));
 
   const filtered = products?.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase());
     const matchCategory = filterCategory === 'all' || p.categoryId === Number(filterCategory);
-    return matchSearch && matchCategory && (p.stock > 0 || cartProductIds.has(p.id!));
+    const origQty = originalQuantities[p.id!] || 0;
+    const allowedStock = p.stock + origQty;
+    return matchSearch && matchCategory && (allowedStock > 0 || cartProductIds.has(p.id!));
   }) ?? [];
 
   const doFullReset = () => {
     setCart([]);
     setEditingTxId(null);
+    setOriginalTx(null);
+    setOriginalItems([]);
+    setOriginalQuantities({});
+    setServiceType('dine_in');
     setTxDiscountType(null);
     setTxDiscountValue('');
     setPaymentMethodId('');
@@ -92,6 +180,9 @@ export default function Kasir() {
     setTableNumber('');
     setRemarks('');
     setIsQuickAdding(false);
+    if (searchParams.has('editTxId')) {
+      setSearchParams({}, { replace: true });
+    }
   };
 
   // === Cart Operations ===
@@ -99,12 +190,18 @@ export default function Kasir() {
   const addToCart = (product: Product) => {
     setCart(prev => {
       const existing = prev.find(c => c.product.id === product.id);
+      const origQty = originalQuantities[product.id!] || 0;
+      const allowedStock = product.stock + origQty;
       if (existing) {
-        if (existing.qty >= product.stock) {
+        if (existing.qty >= allowedStock) {
           toast.error('Stok tidak cukup');
           return prev;
         }
         return prev.map(c => c.product.id === product.id ? { ...c, qty: c.qty + 1 } : c);
+      }
+      if (allowedStock <= 0) {
+        toast.error('Stok tidak cukup');
+        return prev;
       }
       return [...prev, { product, qty: 1, discountType: null, discountValue: 0 }];
     });
@@ -115,7 +212,9 @@ export default function Kasir() {
       if (c.product.id !== productId) return c;
       const newQty = c.qty + delta;
       if (newQty <= 0) return c;
-      if (newQty > c.product.stock) { toast.error('Stok tidak cukup'); return c; }
+      const origQty = originalQuantities[productId] || 0;
+      const allowedStock = c.product.stock + origQty;
+      if (newQty > allowedStock) { toast.error('Stok tidak cukup'); return c; }
       return { ...c, qty: newQty };
     }));
   };
@@ -213,9 +312,10 @@ export default function Kasir() {
         discountAmount: txDiscountAmount,
         total,
         customerName: customerName.trim() || undefined,
-        tableNumber: tableNumber.trim() || undefined,
+        tableNumber: serviceType === 'take_away' ? undefined : (tableNumber.trim() || undefined),
         remarks: remarks.trim() || undefined,
         date: now,
+        serviceType,
       });
       await db.transactionItems.where('transactionId').equals(editingTxId).delete();
       const itemRecords: TransactionItemRecord[] = cart.map(c => ({
@@ -233,14 +333,17 @@ export default function Kasir() {
       }));
       await db.transactionItems.bulkAdd(itemRecords);
 
-      // Adjust stock deltas
+      // Adjust stock deltas safely by fetching fresh database stock
       for (const cartItem of cart) {
         const oldItem = oldItems.find(oi => oi.productId === cartItem.product.id);
         const oldQty = oldItem?.quantity ?? 0;
         const newQty = cartItem.qty;
         const delta = newQty - oldQty;
         if (delta !== 0) {
-          await db.products.update(cartItem.product.id!, { stock: cartItem.product.stock - delta, updatedAt: new Date() });
+          const freshProduct = await db.products.get(cartItem.product.id!);
+          if (freshProduct) {
+            await db.products.update(cartItem.product.id!, { stock: freshProduct.stock - delta, updatedAt: new Date() });
+          }
         }
       }
       // Restore stock for removed items that were in old bill
@@ -273,10 +376,11 @@ export default function Kasir() {
         receiptNumber,
         status: 'open',
         customerName: customerName.trim() || undefined,
-        tableNumber: tableNumber.trim() || undefined,
+        tableNumber: serviceType === 'take_away' ? undefined : (tableNumber.trim() || undefined),
         remarks: remarks.trim() || undefined,
         openedAt: now,
         createdBy: currentUser?.id,
+        serviceType,
       };
 
       const txId = await db.transactions.add(txData);
@@ -297,7 +401,10 @@ export default function Kasir() {
       await db.transactionItems.bulkAdd(itemRecords);
 
       for (const item of cart) {
-        await db.products.update(item.product.id!, { stock: item.product.stock - item.qty, updatedAt: new Date() });
+        const freshProduct = await db.products.get(item.product.id!);
+        if (freshProduct) {
+          await db.products.update(item.product.id!, { stock: freshProduct.stock - item.qty, updatedAt: new Date() });
+        }
       }
 
       toast.success(`Bill ${receiptNumber} disimpan!`);
@@ -331,6 +438,7 @@ export default function Kasir() {
     setCustomerName(tx.customerName || '');
     setTableNumber(tx.tableNumber || '');
     setRemarks(tx.remarks || '');
+    setServiceType(tx.serviceType || 'dine_in');
     setOpenBillsOpen(false);
     setCartOpen(true);
   };
@@ -389,9 +497,10 @@ export default function Kasir() {
         change,
         profit: totalProfit,
         customerName: customerName.trim() || undefined,
-        tableNumber: tableNumber.trim() || undefined,
+        tableNumber: serviceType === 'take_away' ? undefined : (tableNumber.trim() || undefined),
         remarks: remarks.trim() || undefined,
         closedAt: new Date(),
+        serviceType,
       });
 
       await db.transactionItems.where('transactionId').equals(editingTxId).delete();
@@ -410,14 +519,17 @@ export default function Kasir() {
       }));
       await db.transactionItems.bulkAdd(itemRecords);
 
-      // Adjust stock deltas (same as saveOpenBill)
+      // Adjust stock deltas safely by fetching fresh database stock
       for (const cartItem of cart) {
         const oldItem = oldItems.find(oi => oi.productId === cartItem.product.id);
         const oldQty = oldItem?.quantity ?? 0;
         const newQty = cartItem.qty;
         const delta = newQty - oldQty;
         if (delta !== 0) {
-          await db.products.update(cartItem.product.id!, { stock: cartItem.product.stock - delta, updatedAt: new Date() });
+          const freshProduct = await db.products.get(cartItem.product.id!);
+          if (freshProduct) {
+            await db.products.update(cartItem.product.id!, { stock: freshProduct.stock - delta, updatedAt: new Date() });
+          }
         }
       }
       for (const oldItem of oldItems) {
@@ -452,9 +564,10 @@ export default function Kasir() {
         receiptNumber,
         status: 'completed',
         customerName: customerName.trim() || undefined,
-        tableNumber: tableNumber.trim() || undefined,
+        tableNumber: serviceType === 'take_away' ? undefined : (tableNumber.trim() || undefined),
         remarks: remarks.trim() || undefined,
         createdBy: currentUser?.id,
+        serviceType,
       };
 
       const txId = await db.transactions.add(txData);
@@ -475,7 +588,10 @@ export default function Kasir() {
       await db.transactionItems.bulkAdd(itemRecords);
 
       for (const item of cart) {
-        await db.products.update(item.product.id!, { stock: item.product.stock - item.qty, updatedAt: new Date() });
+        const freshProduct = await db.products.get(item.product.id!);
+        if (freshProduct) {
+          await db.products.update(item.product.id!, { stock: freshProduct.stock - item.qty, updatedAt: new Date() });
+        }
       }
 
       toast.success(`Transaksi berhasil! ${receiptNumber}`);
@@ -532,6 +648,26 @@ export default function Kasir() {
           )}
         </Button>
       </div>
+
+      {/* Edit Notice Banner */}
+      {editingTxId && (
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5 mb-3 bg-primary/10 border border-primary/20 rounded-xl text-xs text-primary font-medium animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-2">
+            <Pencil className="w-3.5 h-3.5 shrink-0" />
+            <span>
+              Mengedit Transaksi <strong>#{originalTx?.receiptNumber}</strong> {originalTx?.status === 'completed' ? '(Lunas)' : '(Open Bill)'}
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2.5 text-xs text-primary hover:bg-primary/20"
+            onClick={doFullReset}
+          >
+            Batal Edit
+          </Button>
+        </div>
+      )}
 
       {/* Search */}
       <div className="flex gap-2 mb-3">
@@ -688,24 +824,61 @@ export default function Kasir() {
               ))}
             </div>
 
-            <div className="flex gap-2 px-4 mb-2">
-              <div className="relative flex-1">
-                <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                <Input
-                  placeholder="Nama pelanggan"
-                  value={customerName}
-                  onChange={e => setCustomerName(e.target.value)}
-                  className="pl-8 h-9 text-xs"
-                />
+            <div className="px-4 mb-2.5 space-y-2">
+              {/* Service Type Toggle */}
+              <div className="grid grid-cols-2 gap-1 p-1 bg-muted rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setServiceType('dine_in')}
+                  className={cn(
+                    "flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                    serviceType === 'dine_in'
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <Utensils className="w-3.5 h-3.5" />
+                  Dine In
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setServiceType('take_away');
+                    setTableNumber('');
+                  }}
+                  className={cn(
+                    "flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                    serviceType === 'take_away'
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <ShoppingBag className="w-3.5 h-3.5" />
+                  Take Away
+                </button>
               </div>
-              <div className="relative flex-[0.6]">
-                <Hash className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                <Input
-                  placeholder="Meja"
-                  value={tableNumber}
-                  onChange={e => setTableNumber(e.target.value)}
-                  className="pl-8 h-9 text-xs"
-                />
+
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Nama pelanggan"
+                    value={customerName}
+                    onChange={e => setCustomerName(e.target.value)}
+                    className="pl-8 h-9 text-xs"
+                  />
+                </div>
+                {serviceType === 'dine_in' && (
+                  <div className="relative flex-[0.6] animate-in fade-in zoom-in-95 duration-150">
+                    <Hash className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder="Meja"
+                      value={tableNumber}
+                      onChange={e => setTableNumber(e.target.value)}
+                      className="pl-8 h-9 text-xs"
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
@@ -749,7 +922,7 @@ export default function Kasir() {
                   variant="outline"
                   className="flex-1 h-12 text-sm font-semibold"
                   onClick={saveOpenBill}
-                  disabled={cart.length === 0}
+                  disabled={cart.length === 0 || originalTx?.status === 'completed'}
                 >
                   <Save className="w-4 h-4 mr-2" />
                   Simpan Bill
@@ -763,7 +936,7 @@ export default function Kasir() {
                 </Button>
               </div>
 
-              {editingTxId && can('delete_transaction') && (
+              {editingTxId && originalTx?.status === 'open' && can('delete_transaction') && (
                 <Button
                   variant="outline"
                   className="w-full h-10 text-xs text-destructive border-destructive/30 hover:bg-destructive/5"
@@ -885,24 +1058,61 @@ export default function Kasir() {
             </div>
 
             {/* Customer / Table quick inputs */}
-            <div className="flex gap-2 mb-2">
-              <div className="relative flex-1">
-                <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                <Input
-                  placeholder="Nama pelanggan"
-                  value={customerName}
-                  onChange={e => setCustomerName(e.target.value)}
-                  className="pl-8 h-9 text-xs"
-                />
+            <div className="space-y-2 mb-2">
+              {/* Service Type Toggle */}
+              <div className="grid grid-cols-2 gap-1 p-1 bg-muted rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setServiceType('dine_in')}
+                  className={cn(
+                    "flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                    serviceType === 'dine_in'
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <Utensils className="w-3.5 h-3.5" />
+                  Dine In
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setServiceType('take_away');
+                    setTableNumber('');
+                  }}
+                  className={cn(
+                    "flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                    serviceType === 'take_away'
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <ShoppingBag className="w-3.5 h-3.5" />
+                  Take Away
+                </button>
               </div>
-              <div className="relative flex-[0.6]">
-                <Hash className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                <Input
-                  placeholder="Meja"
-                  value={tableNumber}
-                  onChange={e => setTableNumber(e.target.value)}
-                  className="pl-8 h-9 text-xs"
-                />
+
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Nama pelanggan"
+                    value={customerName}
+                    onChange={e => setCustomerName(e.target.value)}
+                    className="pl-8 h-9 text-xs"
+                  />
+                </div>
+                {serviceType === 'dine_in' && (
+                  <div className="relative flex-[0.6] animate-in fade-in zoom-in-95 duration-150">
+                    <Hash className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder="Meja"
+                      value={tableNumber}
+                      onChange={e => setTableNumber(e.target.value)}
+                      className="pl-8 h-9 text-xs"
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
@@ -948,7 +1158,7 @@ export default function Kasir() {
                   variant="outline"
                   className="flex-1 h-12 text-sm font-semibold"
                   onClick={saveOpenBill}
-                  disabled={cart.length === 0}
+                  disabled={cart.length === 0 || originalTx?.status === 'completed'}
                 >
                   <Save className="w-4 h-4 mr-2" />
                   Simpan Bill
@@ -962,7 +1172,7 @@ export default function Kasir() {
                 </Button>
               </div>
 
-              {editingTxId && can('delete_transaction') && (
+              {editingTxId && originalTx?.status === 'open' && can('delete_transaction') && (
                 <Button
                   variant="outline"
                   className="w-full h-10 text-xs text-destructive border-destructive/30 hover:bg-destructive/5"
@@ -1095,6 +1305,39 @@ export default function Kasir() {
             </div>
 
             <div className="space-y-2">
+              {/* Service Type Toggle */}
+              <div className="grid grid-cols-2 gap-1 p-1 bg-muted rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setServiceType('dine_in')}
+                  className={cn(
+                    "flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                    serviceType === 'dine_in'
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <Utensils className="w-3.5 h-3.5" />
+                  Dine In
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setServiceType('take_away');
+                    setTableNumber('');
+                  }}
+                  className={cn(
+                    "flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                    serviceType === 'take_away'
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <ShoppingBag className="w-3.5 h-3.5" />
+                  Take Away
+                </button>
+              </div>
+
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -1105,15 +1348,17 @@ export default function Kasir() {
                     className="pl-8 h-10 text-sm"
                   />
                 </div>
-                <div className="relative flex-[0.7]">
-                  <Hash className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                  <Input
-                    placeholder="Meja"
-                    value={tableNumber}
-                    onChange={e => setTableNumber(e.target.value)}
-                    className="pl-8 h-10 text-sm"
-                  />
-                </div>
+                {serviceType === 'dine_in' && (
+                  <div className="relative flex-[0.7] animate-in fade-in zoom-in-95 duration-150">
+                    <Hash className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder="Meja"
+                      value={tableNumber}
+                      onChange={e => setTableNumber(e.target.value)}
+                      className="pl-8 h-10 text-sm"
+                    />
+                  </div>
+                )}
               </div>
               <Input
                 placeholder="Catatan tambahan (opsional)"

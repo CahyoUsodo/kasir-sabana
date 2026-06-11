@@ -140,6 +140,7 @@ export interface Transaction {
   openedAt?: Date;
   closedAt?: Date;
   createdBy?: number; // userId — kasir pembuat transaksi
+  serviceType?: 'dine_in' | 'take_away';
 }
 
 export interface TransactionItemRecord {

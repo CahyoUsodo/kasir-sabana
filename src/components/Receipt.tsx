@@ -304,6 +304,10 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
         if (transaction.customerName) {
           wrapText(`Pelanggan: ${transaction.customerName}`, 32).forEach(line => lines.push(line + '\n'));
         }
+        if (transaction.serviceType) {
+          const typeLabel = transaction.serviceType === 'take_away' ? 'Take Away' : 'Dine In';
+          lines.push(`Tipe: ${typeLabel}\n`);
+        }
         if (transaction.tableNumber) lines.push(`Meja: ${transaction.tableNumber}\n`);
         if (transaction.remarks) {
           wrapText(`Catatan: ${transaction.remarks}`, 32).forEach(line => lines.push(line + '\n'));
@@ -363,6 +367,12 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
           lines.push(`\x1D\x21\x11#${queueNumber}\n\x1D\x21\x00`); // Double size number
           lines.push('\x1B\x45\x00'); // Bold off
         }
+        if (transaction.serviceType) {
+          lines.push('\x1B\x45\x01'); // Bold on
+          const typeLabel = transaction.serviceType === 'take_away' ? 'TAKE AWAY' : 'DINE IN';
+          lines.push(`${typeLabel}\n`);
+          lines.push('\x1B\x45\x00'); // Bold off
+        }
         lines.push('--------------------------------\n');
 
         lines.push('\x1B\x61\x00'); // Left align
@@ -371,6 +381,10 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
         if (cashierName) lines.push(`Kasir: ${cashierName}\n`);
         if (transaction.customerName) {
           wrapText(`Pelanggan: ${transaction.customerName}`, 32).forEach(line => lines.push(line + '\n'));
+        }
+        if (transaction.serviceType) {
+          const typeLabel = transaction.serviceType === 'take_away' ? 'Take Away' : 'Dine In';
+          lines.push(`Tipe: ${typeLabel}\n`);
         }
         if (transaction.tableNumber) lines.push(`Meja: ${transaction.tableNumber}\n`);
         if (transaction.remarks) {
@@ -521,6 +535,11 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
                   <span>Pelanggan: {transaction.customerName}</span>
                 </div>
               )}
+              {transaction.serviceType && (
+                <div className="flex justify-between text-[10px]">
+                  <span>Tipe: {transaction.serviceType === 'take_away' ? 'Take Away' : 'Dine In'}</span>
+                </div>
+              )}
               {transaction.tableNumber && (
                 <div className="flex justify-between text-[10px]">
                   <span>Meja: {transaction.tableNumber}</span>
@@ -607,6 +626,13 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
                   <p className="text-lg font-bold">#{queueNumber}</p>
                 </div>
               )}
+              {transaction.serviceType && (
+                <div className="text-center my-1">
+                  <p className="text-xs font-bold bg-black text-white py-1 rounded tracking-wider">
+                    {transaction.serviceType === 'take_away' ? 'TAKE AWAY' : 'DINE IN'}
+                  </p>
+                </div>
+              )}
 
               <div className="border-t border-dashed border-gray-400 my-2" />
 
@@ -625,6 +651,11 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
               {transaction.customerName && (
                 <div className="flex justify-between text-[10px]">
                   <span>Pelanggan: {transaction.customerName}</span>
+                </div>
+              )}
+              {transaction.serviceType && (
+                <div className="flex justify-between text-[10px]">
+                  <span>Tipe: {transaction.serviceType === 'take_away' ? 'Take Away' : 'Dine In'}</span>
                 </div>
               )}
               {transaction.tableNumber && (
