@@ -1269,8 +1269,23 @@ export default function Kasir() {
 
             <div className="space-y-1.5">
               <p className="text-sm font-medium">Jumlah Bayar</p>
-              <div className="h-12 flex items-center justify-center rounded-md border border-input bg-background text-lg font-bold text-center px-3">
-                {paidAmount > 0 ? `Rp ${paidAmount.toLocaleString('id-ID')}` : 'Rp 0'}
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-bold text-lg select-none">Rp</span>
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  className="pl-10 pr-3 h-12 text-lg font-bold text-center w-full"
+                  value={paymentAmount ? Number(paymentAmount).toLocaleString('id-ID') : ''}
+                  onChange={(e) => {
+                    const cleanVal = e.target.value.replace(/\D/g, '');
+                    const finalVal = cleanVal ? String(Number(cleanVal)) : '';
+                    setPaymentAmount(finalVal);
+                    setIsQuickAdding(!!finalVal);
+                  }}
+                  onFocus={(e) => e.target.select()}
+                  placeholder="0"
+                />
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {[1000, 2000, 5000, 10000, 20000, 50000, 100000].map(nom => (
