@@ -321,12 +321,13 @@ export default function TransactionHistory() {
                     className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow active:scale-[0.99]"
                     onClick={() => openDetail(tx)}
                   >
-                    <CardContent className="p-3 flex items-center gap-3">
-                      <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center shrink-0', tx.status === 'open' ? 'bg-warning/10 text-warning' : 'bg-primary/10 text-primary')}>
+                    <CardContent className="p-3 flex items-start gap-3">
+                      <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5', tx.status === 'open' ? 'bg-warning/10 text-warning' : 'bg-primary/10 text-primary')}>
                         {tx.status === 'open' ? <ShoppingCart className="w-4 h-4" /> : <ReceiptIcon className="w-4 h-4" />}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
+                      
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <p className="text-xs font-mono text-muted-foreground truncate">{tx.receiptNumber}</p>
                             {tx.status === 'open' ? (
@@ -348,32 +349,51 @@ export default function TransactionHistory() {
                               </Badge>
                             )}
                           </div>
-                          <p className="text-xs text-muted-foreground">{format(new Date(tx.date), 'HH:mm')}</p>
+                          <span className="text-sm font-bold text-primary shrink-0">{rp(tx.total)}</span>
                         </div>
-                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground truncate mt-0.5">
-                          {multiUserEnabled && (
-                            <span className="flex items-center gap-0.5">
-                              <UserCircle2 className="w-3 h-3" />
-                              {cashierName(tx.createdBy)}
-                            </span>
-                          )}
-                          {tx.customerName && <span>👤 {tx.customerName}</span>}
-                          {tx.serviceType && (
-                            <span>
-                              {tx.serviceType === 'take_away' ? '🥡 Take Away' : '🍽️ Dine In'}
-                            </span>
-                          )}
-                          {tx.tableNumber && <span>Meja {tx.tableNumber}</span>}
-                          {tx.remarks && <span>📝 {tx.remarks}</span>}
-                        </div>
-                        <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+
+                        <p className="text-xs text-foreground font-medium truncate">
                           {getTxItems(tx.id).map(it => it.productName).join(', ')}
                         </p>
+
+                        <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
+                          <span>{format(new Date(tx.date), 'HH:mm')}</span>
+                          {multiUserEnabled && (
+                            <>
+                              <span>•</span>
+                              <span className="flex items-center gap-0.5">
+                                <UserCircle2 className="w-3.5 h-3.5 text-muted-foreground/80" />
+                                {cashierName(tx.createdBy)}
+                              </span>
+                            </>
+                          )}
+                          {tx.customerName && (
+                            <>
+                              <span>•</span>
+                              <span>👤 {tx.customerName}</span>
+                            </>
+                          )}
+                          {tx.serviceType && (
+                            <>
+                              <span>•</span>
+                              <span>{tx.serviceType === 'take_away' ? '🥡 Take Away' : '🍽️ Dine In'}</span>
+                            </>
+                          )}
+                          {tx.tableNumber && (
+                            <>
+                              <span>•</span>
+                              <span>Meja {tx.tableNumber}</span>
+                            </>
+                          )}
+                          {tx.remarks && (
+                            <>
+                              <span>•</span>
+                              <span className="truncate max-w-[150px]">📝 {tx.remarks}</span>
+                            </>
+                          )}
+                        </div>
                       </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-sm font-bold text-primary">{rp(tx.total)}</p>
-                      </div>
-                      <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+                      <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0 self-center" />
                     </CardContent>
                   </Card>
                 ))}
