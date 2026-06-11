@@ -326,6 +326,7 @@ export default function TransactionHistory() {
                         {tx.status === 'open' ? <ShoppingCart className="w-4 h-4" /> : <ReceiptIcon className="w-4 h-4" />}
                       </div>
                       <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <p className="text-xs font-mono text-muted-foreground truncate">{tx.receiptNumber}</p>
                             {tx.status === 'open' ? (
@@ -349,8 +350,7 @@ export default function TransactionHistory() {
                           </div>
                           <p className="text-xs text-muted-foreground">{format(new Date(tx.date), 'HH:mm')}</p>
                         </div>
-                        <p className="text-sm font-bold text-primary">{rp(tx.total)}</p>
-                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground truncate">
+                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground truncate mt-0.5">
                           {multiUserEnabled && (
                             <span className="flex items-center gap-0.5">
                               <UserCircle2 className="w-3 h-3" />
@@ -366,9 +366,12 @@ export default function TransactionHistory() {
                           {tx.tableNumber && <span>Meja {tx.tableNumber}</span>}
                           {tx.remarks && <span>📝 {tx.remarks}</span>}
                         </div>
-                        <p className="text-[10px] text-muted-foreground truncate">
+                        <p className="text-[10px] text-muted-foreground truncate mt-0.5">
                           {getTxItems(tx.id).map(it => it.productName).join(', ')}
                         </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-sm font-bold text-primary">{rp(tx.total)}</p>
                       </div>
                       <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
                     </CardContent>
