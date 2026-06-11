@@ -183,6 +183,27 @@ export interface StoreSettings {
   securityPin?: string; // Hashed 6-digit security PIN
 }
 
+export interface WarehouseItem {
+  id?: number;
+  name: string; // e.g. "Paha Bawah", "Bungkus Kulit", "Plastik Kecil", "Saus Sambal"
+  stock: number;
+  unit: string;
+  isCashierVisible: number; // 0 = no, 1 = yes
+  price?: number; // selling price at cashier (default 0)
+  isDailyReset: number; // 0 = no, 1 = yes (for chicken pieces)
+  lastPreparedDate?: string; // YYYY-MM-DD
+  isDeleted: number; // 0 = active, 1 = deleted
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ProductRecipe {
+  id?: number;
+  productId: number;
+  warehouseItemId: number;
+  quantity: number; // quantity of warehouse item consumed
+}
+
 // === Database ===
 
 class PosDatabase extends Dexie {
@@ -198,6 +219,8 @@ class PosDatabase extends Dexie {
   storeSettings!: Table<StoreSettings>;
   users!: Table<User>;
   units!: Table<Unit>;
+  warehouseItems!: Table<WarehouseItem>;
+  productRecipes!: Table<ProductRecipe>;
 
   constructor() {
     super('kasirgratisan-db');
@@ -435,10 +458,53 @@ class PosDatabase extends Dexie {
       units:            '++id, &name, isDeleted',
       users:            '++id, &username, role, isActive',
     });
+
+    // Version 8 — Warehouse & Recipe Mapping
+    this.version(8).stores({
+      categories:       '++id, name, isDeleted',
+      products:         '++id, name, &sku, categoryId, barcode, isDeleted, createdBy, updatedBy',
+      suppliers:        '++id, name, isDeleted',
+      stockIns:         '++id, productId, supplierId, date, createdBy',
+      stockOuts:        '++id, productId, date, createdBy',
+      hppHistory:       '++id, productId, date',
+      paymentMethods:   '++id, name, category',
+      transactions:     '++id, date, &receiptNumber, paymentMethodId, status, orderNumber, createdBy',
+      transactionItems: '++id, transactionId, productId',
+      storeSettings:    '++id',
+      units:            '++id, &name, isDeleted',
+      users:            '++id, &username, role, isActive',
+      warehouseItems:   '++id, name, isDeleted, isCashierVisible, isDailyReset',
+      productRecipes:   '++id, productId, warehouseItemId',
+    });
   }
 }
 
 export const db = new PosDatabase();
+
+// Helper to adjust warehouse stock during checkout or cancels
+export async function adjustWarehouseStock(productId: number, qtyDelta: number) {
+  if (productId < 0) {
+    const warehouseItemId = Math.abs(productId);
+    const item = await db.warehouseItems.get(warehouseItemId);
+    if (item) {
+      await db.warehouseItems.update(warehouseItemId, {
+        stock: Math.max(0, item.stock - qtyDelta),
+        updatedAt: new Date()
+      });
+    }
+  } else {
+    const recipes = await db.productRecipes.where('productId').equals(productId).toArray();
+    for (const recipe of recipes) {
+      const item = await db.warehouseItems.get(recipe.warehouseItemId);
+      if (item) {
+        await db.warehouseItems.update(recipe.warehouseItemId, {
+          stock: Math.max(0, item.stock - (recipe.quantity * qtyDelta)),
+          updatedAt: new Date()
+        });
+      }
+    }
+  }
+}
 
 // Seed default data
 export async function seedDefaultData() {
@@ -448,6 +514,21 @@ export async function seedDefaultData() {
       { name: 'Makanan', color: '#FF6B35', icon: '🍕', createdAt: new Date(), isDeleted: 0, deletedAt: null },
       { name: 'Minuman', color: '#4ECDC4', icon: '🥤', createdAt: new Date(), isDeleted: 0, deletedAt: null },
       { name: 'Lainnya', color: '#95A5A6', icon: '📦', createdAt: new Date(), isDeleted: 0, deletedAt: null },
+    ]);
+  }
+
+  const warehouseCount = await db.warehouseItems.count();
+  if (warehouseCount === 0) {
+    const now = new Date();
+    await db.warehouseItems.bulkAdd([
+      { name: 'Paha Bawah', stock: 0, unit: 'pcs', isCashierVisible: 0, isDailyReset: 1, lastPreparedDate: '', isDeleted: 0, createdAt: now, updatedAt: now },
+      { name: 'Paha Atas', stock: 0, unit: 'pcs', isCashierVisible: 0, isDailyReset: 1, lastPreparedDate: '', isDeleted: 0, createdAt: now, updatedAt: now },
+      { name: 'Sayap', stock: 0, unit: 'pcs', isCashierVisible: 0, isDailyReset: 1, lastPreparedDate: '', isDeleted: 0, createdAt: now, updatedAt: now },
+      { name: 'Dada', stock: 0, unit: 'pcs', isCashierVisible: 0, isDailyReset: 1, lastPreparedDate: '', isDeleted: 0, createdAt: now, updatedAt: now },
+      { name: 'Plastik Kecil', stock: 100, unit: 'pcs', isCashierVisible: 1, price: 200, isDailyReset: 0, isDeleted: 0, createdAt: now, updatedAt: now },
+      { name: 'Plastik Besar', stock: 100, unit: 'pcs', isCashierVisible: 1, price: 500, isDailyReset: 0, isDeleted: 0, createdAt: now, updatedAt: now },
+      { name: 'Saus Sambal Saset', stock: 500, unit: 'pcs', isCashierVisible: 1, price: 300, isDailyReset: 0, isDeleted: 0, createdAt: now, updatedAt: now },
+      { name: 'Saus Tomat Saset', stock: 500, unit: 'pcs', isCashierVisible: 1, price: 300, isDailyReset: 0, isDeleted: 0, createdAt: now, updatedAt: now },
     ]);
   }
 

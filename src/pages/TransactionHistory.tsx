@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Transaction, type TransactionItemRecord } from '@/lib/db';
+import { db, type Transaction, type TransactionItemRecord, adjustWarehouseStock } from '@/lib/db';
 import { useState, useEffect } from 'react';
 import { format, startOfDay, endOfDay } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
@@ -146,6 +146,7 @@ export default function TransactionHistory() {
           if (product) {
             await db.products.update(item.productId, { stock: product.stock + item.quantity });
           }
+          await adjustWarehouseStock(item.productId, -item.quantity);
         }
       }
       await db.transactionItems.where('transactionId').equals(selectedTx.id).delete();

@@ -18,6 +18,7 @@ import StockOutPage from "./pages/StockOut";
 import TransactionHistory from "./pages/TransactionHistory";
 import StockReport from "./pages/StockReport";
 import UsersPage from "./pages/Users";
+import WarehousePage from "./pages/Warehouse";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -79,6 +80,7 @@ const App = () => {
                 <Route path="/history" element={<TransactionHistory />} />
                 <Route path="/stock-report" element={<StockReport />} />
                 <Route path="/users" element={<UsersPage />} />
+                <Route path="/warehouse" element={<WarehousePage />} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>

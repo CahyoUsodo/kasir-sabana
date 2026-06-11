@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Product, type Category, type Transaction, type TransactionItemRecord } from '@/lib/db';
+import { db, type Product, type Category, type Transaction, type TransactionItemRecord, adjustWarehouseStock } from '@/lib/db';
 import { useState, useRef, useEffect } from 'react';
 import { Search, Plus, Minus, ShoppingCart, X, Percent, Tag, CreditCard, Banknote, Check, Package as PackageIcon, ClipboardList, Save, Pencil, User, Hash, Trash2, Utensils, ShoppingBag } from 'lucide-react';
 import Receipt from '@/components/Receipt';
@@ -70,8 +70,13 @@ export default function Kasir() {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelTargetTx, setCancelTargetTx] = useState<Transaction | null>(null);
 
+  const [prepModalOpen, setPrepModalOpen] = useState(false);
+  const [prepCount, setPrepCount] = useState('1');
+
   const products = useLiveQuery(() => db.products.where('isDeleted').equals(0).toArray());
   const categories = useLiveQuery(() => db.categories.where('isDeleted').equals(0).toArray());
+  const visibleWarehouseItems = useLiveQuery(() => db.warehouseItems.where('isDeleted').equals(0).toArray());
+  const chickenItems = useLiveQuery(() => db.warehouseItems.where('isDailyReset').equals(1).toArray());
   const paymentMethods = useLiveQuery(() => db.paymentMethods.toArray());
   const storeSettings = useLiveQuery(() => db.storeSettings.toCollection().first());
   const openBills = useLiveQuery(() => db.transactions.where('status').equals('open').reverse().sortBy('date'));
@@ -97,6 +102,26 @@ export default function Kasir() {
 
       for (const item of items) {
         let product = allProducts.find(p => p.id === item.productId);
+        if (!product && item.productId < 0) {
+          const whId = Math.abs(item.productId);
+          const whItem = await db.warehouseItems.get(whId);
+          if (whItem) {
+            product = {
+              id: item.productId,
+              name: whItem.name,
+              sku: `WH-${whItem.id}`,
+              categoryId: -99,
+              price: item.price,
+              hpp: item.hpp,
+              stock: whItem.stock,
+              unit: whItem.unit,
+              createdAt: whItem.createdAt,
+              updatedAt: whItem.updatedAt,
+              isDeleted: whItem.isDeleted,
+              deletedAt: null
+            };
+          }
+        }
         if (!product) {
           product = {
             id: item.productId,
@@ -155,15 +180,85 @@ export default function Kasir() {
     }
   }, [editTxIdParam]);
 
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  const needsPrep = chickenItems && chickenItems.length > 0 && chickenItems.some(item => item.lastPreparedDate !== todayStr);
+
+  useEffect(() => {
+    if (needsPrep) {
+      setPrepModalOpen(true);
+    } else {
+      setPrepModalOpen(false);
+    }
+  }, [needsPrep]);
+
+  const handleDailyPrep = async () => {
+    const counts = parseInt(prepCount) || 0;
+    if (counts <= 0) {
+      toast.error('Jumlah ayam harus lebih dari 0');
+      return;
+    }
+
+    const formulas = [
+      { name: 'Paha Bawah', factor: 2 },
+      { name: 'Paha Atas', factor: 2 },
+      { name: 'Sayap', factor: 2 },
+      { name: 'Dada', factor: 3 }
+    ];
+
+    try {
+      for (const formula of formulas) {
+        const item = await db.warehouseItems
+          .where('name')
+          .equalsIgnoreCase(formula.name)
+          .first();
+
+        if (item) {
+          const addQty = formula.factor * counts;
+          await db.warehouseItems.update(item.id!, {
+            stock: addQty,
+            lastPreparedDate: todayStr,
+            updatedAt: new Date()
+          });
+        }
+      }
+      toast.success(`Berhasil memproses persiapan ${counts} ekor Ayam Potong 9 untuk hari ini!`);
+      setPrepModalOpen(false);
+    } catch (err) {
+      console.error(err);
+      toast.error('Gagal memproses persiapan ayam harian');
+    }
+  };
+
   const cartProductIds = new Set(cart.map(c => c.product.id));
 
-  const filtered = products?.filter(p => {
+  const cashierVisibleItems = visibleWarehouseItems?.filter(item => item.isCashierVisible === 1) ?? [];
+  const virtualProducts: Product[] = cashierVisibleItems.map(item => ({
+    id: -item.id!,
+    name: item.name,
+    sku: `WH-${item.id}`,
+    categoryId: -99,
+    price: item.price || 0,
+    hpp: 0,
+    stock: item.stock,
+    unit: item.unit,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    isDeleted: 0,
+    deletedAt: null
+  }));
+
+  const allAvailableProducts = [
+    ...(products ?? []),
+    ...virtualProducts
+  ];
+
+  const filtered = allAvailableProducts.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase());
     const matchCategory = filterCategory === 'all' || p.categoryId === Number(filterCategory);
     const origQty = originalQuantities[p.id!] || 0;
     const allowedStock = p.stock + origQty;
     return matchSearch && matchCategory && (allowedStock > 0 || cartProductIds.has(p.id!));
-  }) ?? [];
+  });
 
   const doFullReset = () => {
     setCart([]);
@@ -340,9 +435,14 @@ export default function Kasir() {
         const newQty = cartItem.qty;
         const delta = newQty - oldQty;
         if (delta !== 0) {
-          const freshProduct = await db.products.get(cartItem.product.id!);
-          if (freshProduct) {
-            await db.products.update(cartItem.product.id!, { stock: freshProduct.stock - delta, updatedAt: new Date() });
+          if (cartItem.product.id! < 0) {
+            await adjustWarehouseStock(cartItem.product.id!, delta);
+          } else {
+            const freshProduct = await db.products.get(cartItem.product.id!);
+            if (freshProduct) {
+              await db.products.update(cartItem.product.id!, { stock: freshProduct.stock - delta, updatedAt: new Date() });
+            }
+            await adjustWarehouseStock(cartItem.product.id!, delta);
           }
         }
       }
@@ -350,9 +450,14 @@ export default function Kasir() {
       for (const oldItem of oldItems) {
         const stillInCart = cart.find(c => c.product.id === oldItem.productId);
         if (!stillInCart) {
-          const product = await db.products.get(oldItem.productId);
-          if (product) {
-            await db.products.update(oldItem.productId, { stock: product.stock + oldItem.quantity });
+          if (oldItem.productId < 0) {
+            await adjustWarehouseStock(oldItem.productId, -oldItem.quantity);
+          } else {
+            const product = await db.products.get(oldItem.productId);
+            if (product) {
+              await db.products.update(oldItem.productId, { stock: product.stock + oldItem.quantity });
+            }
+            await adjustWarehouseStock(oldItem.productId, -oldItem.quantity);
           }
         }
       }
@@ -401,9 +506,14 @@ export default function Kasir() {
       await db.transactionItems.bulkAdd(itemRecords);
 
       for (const item of cart) {
-        const freshProduct = await db.products.get(item.product.id!);
-        if (freshProduct) {
-          await db.products.update(item.product.id!, { stock: freshProduct.stock - item.qty, updatedAt: new Date() });
+        if (item.product.id! < 0) {
+          await adjustWarehouseStock(item.product.id!, item.qty);
+        } else {
+          const freshProduct = await db.products.get(item.product.id!);
+          if (freshProduct) {
+            await db.products.update(item.product.id!, { stock: freshProduct.stock - item.qty, updatedAt: new Date() });
+          }
+          await adjustWarehouseStock(item.product.id!, item.qty);
         }
       }
 
@@ -416,40 +526,87 @@ export default function Kasir() {
 
   const loadOpenBill = async (tx: Transaction) => {
     if (!tx.id) return;
-    const items = await db.transactionItems.where('transactionId').equals(tx.id).toArray();
-    const allProducts = await db.products.where('isDeleted').equals(0).toArray();
+    try {
+      const items = await db.transactionItems.where('transactionId').equals(tx.id).toArray();
+      const allProducts = await db.products.toArray();
 
-    const cartItems: CartItem[] = items.map(item => {
-      const product = allProducts.find(p => p.id === item.productId);
-      if (!product) throw new Error(`Produk "${item.productName}" tidak ditemukan`);
-      return {
-        product,
-        qty: item.quantity,
-        discountType: item.discountType as 'percentage' | 'nominal' | null,
-        discountValue: item.discountValue,
-        notes: item.notes,
-      };
-    });
+      const cartItems: CartItem[] = [];
 
-    setCart(cartItems);
-    setEditingTxId(tx.id);
-    setTxDiscountType(tx.discountType);
-    setTxDiscountValue(tx.discountType ? String(tx.discountValue) : '');
-    setCustomerName(tx.customerName || '');
-    setTableNumber(tx.tableNumber || '');
-    setRemarks(tx.remarks || '');
-    setServiceType(tx.serviceType || 'dine_in');
-    setOpenBillsOpen(false);
-    setCartOpen(true);
+      for (const item of items) {
+        let product = allProducts.find(p => p.id === item.productId);
+        if (!product && item.productId < 0) {
+          const whId = Math.abs(item.productId);
+          const whItem = await db.warehouseItems.get(whId);
+          if (whItem) {
+            product = {
+              id: item.productId,
+              name: whItem.name,
+              sku: `WH-${whItem.id}`,
+              categoryId: -99,
+              price: item.price,
+              hpp: item.hpp,
+              stock: whItem.stock,
+              unit: whItem.unit,
+              createdAt: whItem.createdAt,
+              updatedAt: whItem.updatedAt,
+              isDeleted: whItem.isDeleted,
+              deletedAt: null
+            };
+          }
+        }
+        if (!product) {
+          product = {
+            id: item.productId,
+            name: item.productName,
+            sku: '',
+            categoryId: 0,
+            price: item.price,
+            hpp: item.hpp,
+            stock: 0,
+            unit: 'pcs',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            isDeleted: 1,
+            deletedAt: new Date()
+          };
+        }
+        cartItems.push({
+          product,
+          qty: item.quantity,
+          discountType: item.discountType as 'percentage' | 'nominal' | null,
+          discountValue: item.discountValue,
+          notes: item.notes,
+        });
+      }
+
+      setCart(cartItems);
+      setEditingTxId(tx.id);
+      setTxDiscountType(tx.discountType);
+      setTxDiscountValue(tx.discountType ? String(tx.discountValue) : '');
+      setCustomerName(tx.customerName || '');
+      setTableNumber(tx.tableNumber || '');
+      setRemarks(tx.remarks || '');
+      setServiceType(tx.serviceType || 'dine_in');
+      setOpenBillsOpen(false);
+      setCartOpen(true);
+    } catch (err) {
+      console.error(err);
+      toast.error('Gagal memuat open bill');
+    }
   };
 
   const cancelOpenBill = async (tx: Transaction) => {
     if (!tx.id) return;
     const items = await db.transactionItems.where('transactionId').equals(tx.id).toArray();
     for (const item of items) {
-      const product = await db.products.get(item.productId);
-      if (product) {
-        await db.products.update(item.productId, { stock: product.stock + item.quantity });
+      if (item.productId < 0) {
+        await adjustWarehouseStock(item.productId, -item.quantity);
+      } else {
+        const product = await db.products.get(item.productId);
+        if (product) {
+          await db.products.update(item.productId, { stock: product.stock + item.quantity });
+        }
+        await adjustWarehouseStock(item.productId, -item.quantity);
       }
     }
     await db.transactionItems.where('transactionId').equals(tx.id).delete();
@@ -526,18 +683,28 @@ export default function Kasir() {
         const newQty = cartItem.qty;
         const delta = newQty - oldQty;
         if (delta !== 0) {
-          const freshProduct = await db.products.get(cartItem.product.id!);
-          if (freshProduct) {
-            await db.products.update(cartItem.product.id!, { stock: freshProduct.stock - delta, updatedAt: new Date() });
+          if (cartItem.product.id! < 0) {
+            await adjustWarehouseStock(cartItem.product.id!, delta);
+          } else {
+            const freshProduct = await db.products.get(cartItem.product.id!);
+            if (freshProduct) {
+              await db.products.update(cartItem.product.id!, { stock: freshProduct.stock - delta, updatedAt: new Date() });
+            }
+            await adjustWarehouseStock(cartItem.product.id!, delta);
           }
         }
       }
       for (const oldItem of oldItems) {
         const stillInCart = cart.find(c => c.product.id === oldItem.productId);
         if (!stillInCart) {
-          const product = await db.products.get(oldItem.productId);
-          if (product) {
-            await db.products.update(oldItem.productId, { stock: product.stock + oldItem.quantity });
+          if (oldItem.productId < 0) {
+            await adjustWarehouseStock(oldItem.productId, -oldItem.quantity);
+          } else {
+            const product = await db.products.get(oldItem.productId);
+            if (product) {
+              await db.products.update(oldItem.productId, { stock: product.stock + oldItem.quantity });
+            }
+            await adjustWarehouseStock(oldItem.productId, -oldItem.quantity);
           }
         }
       }
@@ -588,9 +755,14 @@ export default function Kasir() {
       await db.transactionItems.bulkAdd(itemRecords);
 
       for (const item of cart) {
-        const freshProduct = await db.products.get(item.product.id!);
-        if (freshProduct) {
-          await db.products.update(item.product.id!, { stock: freshProduct.stock - item.qty, updatedAt: new Date() });
+        if (item.product.id! < 0) {
+          await adjustWarehouseStock(item.product.id!, item.qty);
+        } else {
+          const freshProduct = await db.products.get(item.product.id!);
+          if (freshProduct) {
+            await db.products.update(item.product.id!, { stock: freshProduct.stock - item.qty, updatedAt: new Date() });
+          }
+          await adjustWarehouseStock(item.product.id!, item.qty);
         }
       }
 
@@ -687,6 +859,11 @@ export default function Kasir() {
             {c.icon} {c.name}
           </button>
         ))}
+        {cashierVisibleItems.length > 0 && (
+          <button onClick={() => setFilterCategory('-99')} className={cn('shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors', filterCategory === '-99' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>
+            📦 Kemasan & Ekstra
+          </button>
+        )}
       </div>
 
       {/* Product Grid */}
@@ -1583,6 +1760,44 @@ export default function Kasir() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Daily Chicken Prep Dialog */}
+      <Dialog open={prepModalOpen} onOpenChange={() => {}}>
+        <DialogContent className="max-w-[95vw] rounded-xl [&>button]:hidden" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle>Persiapan Ayam Hari Ini</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <p className="text-sm text-muted-foreground">
+              SOP Sabana: Stok ayam potong 9 diset ulang setiap hari baru. Masukkan jumlah Ayam Potong 9 yang dipersiapkan hari ini:
+            </p>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground">Jumlah Ayam (Ekor)</label>
+              <Input
+                type="number"
+                min="1"
+                value={prepCount}
+                onChange={e => setPrepCount(e.target.value)}
+                placeholder="Contoh: 10"
+                className="h-12 text-lg font-bold text-center"
+              />
+            </div>
+            <div className="text-xs bg-muted p-3 rounded-lg space-y-1">
+              <p className="font-semibold">Estimasi potongan yang dihasilkan:</p>
+              <ul className="list-disc pl-4 space-y-0.5">
+                <li>Paha Bawah: {(parseInt(prepCount) || 0) * 2} pcs</li>
+                <li>Paha Atas: {(parseInt(prepCount) || 0) * 2} pcs</li>
+                <li>Sayap: {(parseInt(prepCount) || 0) * 2} pcs</li>
+                <li>Dada: {(parseInt(prepCount) || 0) * 3} pcs</li>
+              </ul>
+            </div>
+            <Button className="w-full h-12 text-base font-semibold" onClick={handleDailyPrep}>
+              <Check className="w-5 h-5 mr-2" />
+              Mulai Hari Baru
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
