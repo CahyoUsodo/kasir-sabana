@@ -131,6 +131,8 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
   const [queueNumber, setQueueNumber] = useState<number | null>(null);
   const [previewType, setPreviewType] = useState<'customer' | 'kitchen'>('customer');
 
+  const printableItems = items.filter(item => item.productId >= 0);
+
   useEffect(() => {
     const fetchQueueNumber = async () => {
       if (!transaction.id || !transaction.date) {
@@ -325,9 +327,8 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
         }
 
         lines.push('--------------------------------\n');
-        
-        for (let i = 0; i < items.length; i++) {
-          const item = items[i];
+               for (let i = 0; i < printableItems.length; i++) {
+          const item = printableItems[i];
           lines.push(`${item.productName}\n`);
           if (item.notes) lines.push(`  ${item.notes}\n`);
           
@@ -335,7 +336,7 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
           const subtotalStr = `Rp ${item.subtotal.toLocaleString('id-ID')}`;
           lines.push(formatLine(qtyPrice, subtotalStr) + '\n');
 
-          if (i < items.length - 1) {
+          if (i < printableItems.length - 1) {
             lines.push('\n');
           }
         }
@@ -359,7 +360,7 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
         lines.push('\x1B\x45\x01'); // Bold on
         lines.push('*** DAPUR ***\n');
         lines.push('\x1B\x45\x00'); // Bold off
-
+ 
         // Print Queue Number (very prominent in kitchen print)
         if (queueNumber !== null) {
           lines.push('\x1B\x45\x01'); // Bold on
@@ -374,7 +375,7 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
           lines.push('\x1B\x45\x00'); // Bold off
         }
         lines.push('--------------------------------\n');
-
+ 
         lines.push('\x1B\x61\x00'); // Left align
         lines.push(`No: ${transaction.receiptNumber}\n`);
         lines.push(`Tanggal: ${format(new Date(transaction.date), 'dd/MM/yyyy HH:mm')}\n`);
@@ -391,9 +392,9 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
           wrapText(`Catatan: ${transaction.remarks}`, 32).forEach(line => lines.push(line + '\n'));
         }
         lines.push('--------------------------------\n');
-
-        for (let i = 0; i < items.length; i++) {
-          const item = items[i];
+ 
+        for (let i = 0; i < printableItems.length; i++) {
+          const item = printableItems[i];
           const qtyStr = `[${item.quantity}x]`.padEnd(6, ' ');
           const maxNameWidth = 32 - qtyStr.length;
           const nameLines = wrapText(item.productName, maxNameWidth);
@@ -412,7 +413,7 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
               lines.push(`  ${noteLine}\n`);
             });
           }
-          if (i < items.length - 1) {
+          if (i < printableItems.length - 1) {
             lines.push('\n');
           }
         }
@@ -561,7 +562,7 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
               <div className="border-t border-dashed border-gray-400 my-2" />
 
               {/* Items */}
-              {items.map((item, i) => (
+              {printableItems.map((item, i) => (
                 <div key={i} className="mb-3">
                   <p className="text-[11px] font-medium">{item.productName}</p>
                   {item.notes && <p className="text-[9px] text-gray-500 italic">  {item.notes}</p>}
@@ -673,7 +674,7 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
 
               {/* Items */}
               <div className="space-y-4">
-                {items.map((item, i) => (
+                {printableItems.map((item, i) => (
                   <div key={i} className="text-[11px]">
                     <div className="flex items-start">
                       <span className="min-w-[36px] text-[11px] font-bold bg-black text-white rounded px-1.5 py-0.5 text-center mr-2">

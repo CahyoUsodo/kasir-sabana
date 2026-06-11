@@ -81,6 +81,7 @@ export default function Kasir() {
   const storeSettings = useLiveQuery(() => db.storeSettings.toCollection().first());
   const openBills = useLiveQuery(() => db.transactions.where('status').equals('open').reverse().sortBy('date'));
   const allUsers = useLiveQuery(() => db.users.toArray());
+  const productRecipes = useLiveQuery(() => db.productRecipes.toArray());
 
   // Permission gate — kept render-side (not redirect) so the bottom nav stays
   // intact. All hooks above run unconditionally; we just swap the rendered tree.
@@ -248,7 +249,28 @@ export default function Kasir() {
   }));
 
   const allAvailableProducts = [
-    ...(products ?? []),
+    ...(products ?? []).map(p => {
+      const recipes = productRecipes?.filter(r => r.productId === p.id) ?? [];
+      if (recipes.length > 0) {
+        let minStock = Infinity;
+        for (const recipe of recipes) {
+          const whItem = visibleWarehouseItems?.find(wi => wi.id === recipe.warehouseItemId);
+          if (whItem) {
+            const available = Math.floor(whItem.stock / recipe.quantity);
+            if (available < minStock) {
+              minStock = available;
+            }
+          } else {
+            minStock = 0;
+          }
+        }
+        return {
+          ...p,
+          stock: minStock === Infinity ? 0 : minStock
+        };
+      }
+      return p;
+    }),
     ...virtualProducts
   ];
 
