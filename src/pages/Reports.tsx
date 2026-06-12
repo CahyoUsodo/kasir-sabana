@@ -118,6 +118,46 @@ export default function Laporan() {
 
   const rp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
 
+  const stockReport = (() => {
+    if (!warehouseItems) return [];
+    
+    // Map of warehouseItemId -> used qty
+    const usedMap: Record<number, number> = {};
+    warehouseItems.forEach(item => {
+      usedMap[item.id!] = 0;
+    });
+
+    allItems.forEach(txItem => {
+      if (txItem.productId < 0) {
+        const warehouseItemId = Math.abs(txItem.productId);
+        if (usedMap[warehouseItemId] !== undefined) {
+          usedMap[warehouseItemId] += txItem.quantity;
+        }
+      } else {
+        const recipes = productRecipes?.filter(r => r.productId === txItem.productId) ?? [];
+        recipes.forEach(recipe => {
+          if (usedMap[recipe.warehouseItemId] !== undefined) {
+            usedMap[recipe.warehouseItemId] += txItem.quantity * recipe.quantity;
+          }
+        });
+      }
+    });
+
+    return warehouseItems.map(item => {
+      const terpakai = usedMap[item.id!] || 0;
+      const sisa = item.stock;
+      const awal = sisa + terpakai;
+      return {
+        id: item.id!,
+        name: item.name,
+        unit: item.unit,
+        awal,
+        terpakai,
+        sisa
+      };
+    });
+  })();
+
   // === Export to Excel ===
   const exportToExcel = async () => {
     if (!transactions || transactions.length === 0) return;
@@ -716,6 +756,36 @@ export default function Laporan() {
     });
 
     // ============================================
+    // SHEET 5: Laporan Stok Bahan
+    // ============================================
+    const wsStok = wb.addWorksheet('Laporan Stok Bahan');
+    wsStok.columns = [
+      { header: 'No', key: 'no', width: 6 },
+      { header: 'Nama Bahan', key: 'name', width: 30 },
+      { header: 'Satuan', key: 'unit', width: 12 },
+      { header: 'Stok Awal', key: 'awal', width: 15 },
+      { header: 'Terpakai/Terjual', key: 'terpakai', width: 18 },
+      { header: 'Sisa Stok', key: 'sisa', width: 15 },
+    ];
+
+    wsStok.getRow(1).eachCell(cell => {
+      // @ts-ignore
+      cell.style = headerStyle;
+    });
+
+    stockReport.forEach((item, i) => {
+      const row = wsStok.addRow({
+        no: i + 1,
+        name: item.name,
+        unit: item.unit,
+        awal: item.awal,
+        terpakai: item.terpakai,
+        sisa: item.sisa
+      });
+      row.eachCell(cell => { cell.border = cellBorder; });
+    });
+
+    // ============================================
     // Trigger download
     // ============================================
     const fileName = `Laporan_${storeName.replace(/\s+/g, '_')}_${format(new Date(), 'yyyyMMdd_HHmm')}.xlsx`;
@@ -723,46 +793,6 @@ export default function Laporan() {
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     saveAs(blob, fileName);
   };
-
-  const stockReport = (() => {
-    if (!warehouseItems) return [];
-    
-    // Map of warehouseItemId -> used qty
-    const usedMap: Record<number, number> = {};
-    warehouseItems.forEach(item => {
-      usedMap[item.id!] = 0;
-    });
-
-    allItems.forEach(txItem => {
-      if (txItem.productId < 0) {
-        const warehouseItemId = Math.abs(txItem.productId);
-        if (usedMap[warehouseItemId] !== undefined) {
-          usedMap[warehouseItemId] += txItem.quantity;
-        }
-      } else {
-        const recipes = productRecipes?.filter(r => r.productId === txItem.productId) ?? [];
-        recipes.forEach(recipe => {
-          if (usedMap[recipe.warehouseItemId] !== undefined) {
-            usedMap[recipe.warehouseItemId] += txItem.quantity * recipe.quantity;
-          }
-        });
-      }
-    });
-
-    return warehouseItems.map(item => {
-      const terpakai = usedMap[item.id!] || 0;
-      const sisa = item.stock;
-      const awal = sisa + terpakai;
-      return {
-        id: item.id!,
-        name: item.name,
-        unit: item.unit,
-        awal,
-        terpakai,
-        sisa
-      };
-    });
-  })();
 
   return (
     <div className="px-4 pt-6 pb-20 space-y-5">
