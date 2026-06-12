@@ -77,6 +77,7 @@ export default function Kasir() {
   const categories = useLiveQuery(() => db.categories.where('isDeleted').equals(0).toArray());
   const visibleWarehouseItems = useLiveQuery(() => db.warehouseItems.where('isDeleted').equals(0).toArray());
   const chickenItems = useLiveQuery(() => db.warehouseItems.where('isDailyReset').equals(1).toArray());
+  const dailyPrepFormulas = useLiveQuery(() => db.dailyPrepFormulas.toArray());
   const paymentMethods = useLiveQuery(() => db.paymentMethods.toArray());
   const storeSettings = useLiveQuery(() => db.storeSettings.toCollection().first());
   const openBills = useLiveQuery(() => db.transactions.where('status').equals('open').reverse().sortBy('date'));
@@ -199,38 +200,87 @@ export default function Kasir() {
   const handleDailyPrep = async () => {
     const counts = parseInt(prepCount) || 0;
     if (counts <= 0) {
-      toast.error('Jumlah ayam harus lebih dari 0');
+      toast.error('Jumlah persiapan harus lebih dari 0');
       return;
     }
 
-    const formulas = [
-      { name: 'Paha Bawah', factor: 2 },
-      { name: 'Paha Atas', factor: 2 },
-      { name: 'Sayap', factor: 2 },
-      { name: 'Dada', factor: 3 }
-    ];
-
     try {
-      for (const formula of formulas) {
-        const item = await db.warehouseItems
-          .where('name')
-          .equalsIgnoreCase(formula.name)
-          .first();
+      // Find the main prep item (e.g. Ayam Potong 9)
+      const ayamPotongItem = await db.warehouseItems
+        .where('name')
+        .equalsIgnoreCase('Ayam Potong 9')
+        .first();
 
-        if (item) {
-          const addQty = formula.factor * counts;
+      if (ayamPotongItem) {
+        const prepItemId = ayamPotongItem.id!;
+        const formulas = await db.dailyPrepFormulas.where('prepItemId').equals(prepItemId).toArray();
+        
+        // Decrement Ayam Potong 9 stock by counts (or keep at 0 if no stock tracked)
+        const newAyamStock = Math.max(0, ayamPotongItem.stock - counts);
+        await db.warehouseItems.update(prepItemId, {
+          stock: newAyamStock,
+          dailyPrepQty: counts,
+          lastPreparedDate: todayStr,
+          updatedAt: new Date()
+        });
+
+        // Add target items
+        for (const formula of formulas) {
+          const targetItem = await db.warehouseItems.get(formula.targetItemId);
+          if (targetItem) {
+            const addQty = formula.factor * counts;
+            await db.warehouseItems.update(targetItem.id!, {
+              stock: addQty,
+              dailyPrepQty: addQty,
+              lastPreparedDate: todayStr,
+              updatedAt: new Date()
+            });
+          }
+        }
+        toast.success(`Berhasil memproses persiapan ${counts} ekor Ayam Potong 9 untuk hari ini!`);
+      } else {
+        // Fallback to old behavior if Ayam Potong 9 doesn't exist
+        const oldFormulas = [
+          { name: 'Paha Bawah', factor: 2 },
+          { name: 'Paha Atas', factor: 2 },
+          { name: 'Sayap', factor: 2 },
+          { name: 'Dada', factor: 3 }
+        ];
+        for (const formula of oldFormulas) {
+          const item = await db.warehouseItems
+            .where('name')
+            .equalsIgnoreCase(formula.name)
+            .first();
+          if (item) {
+            const addQty = formula.factor * counts;
+            await db.warehouseItems.update(item.id!, {
+              stock: addQty,
+              dailyPrepQty: addQty,
+              lastPreparedDate: todayStr,
+              updatedAt: new Date()
+            });
+          }
+        }
+        toast.success(`Berhasil memproses persiapan ${counts} ekor Ayam Potong 9 untuk hari ini!`);
+      }
+
+      // Mark other daily reset items (e.g. Es Batu) as prepared to avoid infinite popups
+      const allDailyItems = await db.warehouseItems.where('isDailyReset').equals(1).toArray();
+      const targetItemIds = new Set((await db.dailyPrepFormulas.toArray()).map(f => f.targetItemId));
+      for (const item of allDailyItems) {
+        if (item.id !== ayamPotongItem?.id && !targetItemIds.has(item.id!) && item.lastPreparedDate !== todayStr) {
           await db.warehouseItems.update(item.id!, {
-            stock: addQty,
             lastPreparedDate: todayStr,
+            dailyPrepQty: 0,
             updatedAt: new Date()
           });
         }
       }
-      toast.success(`Berhasil memproses persiapan ${counts} ekor Ayam Potong 9 untuk hari ini!`);
+
       setPrepModalOpen(false);
     } catch (err) {
       console.error(err);
-      toast.error('Gagal memproses persiapan ayam harian');
+      toast.error('Gagal memproses persiapan harian');
     }
   };
 
@@ -1815,10 +1865,28 @@ export default function Kasir() {
             <div className="text-xs bg-muted p-3 rounded-lg space-y-1">
               <p className="font-semibold">Estimasi potongan yang dihasilkan:</p>
               <ul className="list-disc pl-4 space-y-0.5">
-                <li>Paha Bawah: {(parseInt(prepCount) || 0) * 2} pcs</li>
-                <li>Paha Atas: {(parseInt(prepCount) || 0) * 2} pcs</li>
-                <li>Sayap: {(parseInt(prepCount) || 0) * 2} pcs</li>
-                <li>Dada: {(parseInt(prepCount) || 0) * 3} pcs</li>
+                {(() => {
+                  const ayamPotongItem = visibleWarehouseItems?.find(wi => wi.name.toLowerCase() === 'ayam potong 9');
+                  const formulas = dailyPrepFormulas?.filter(f => f.prepItemId === ayamPotongItem?.id) || [];
+                  if (formulas.length === 0) {
+                    return (
+                      <>
+                        <li>Paha Bawah: {(parseInt(prepCount) || 0) * 2} pcs</li>
+                        <li>Paha Atas: {(parseInt(prepCount) || 0) * 2} pcs</li>
+                        <li>Sayap: {(parseInt(prepCount) || 0) * 2} pcs</li>
+                        <li>Dada: {(parseInt(prepCount) || 0) * 3} pcs</li>
+                      </>
+                    );
+                  }
+                  return formulas.map(f => {
+                    const targetItem = visibleWarehouseItems?.find(wi => wi.id === f.targetItemId);
+                    return (
+                      <li key={f.id}>
+                        {targetItem?.name || `Bahan #${f.targetItemId}`}: {(parseInt(prepCount) || 0) * f.factor} {targetItem?.unit || 'pcs'}
+                      </li>
+                    );
+                  });
+                })()}
               </ul>
             </div>
             <Button className="w-full h-12 text-base font-semibold" onClick={handleDailyPrep}>

@@ -207,6 +207,13 @@ export interface ProductRecipe {
   quantity: number; // quantity of warehouse item consumed
 }
 
+export interface DailyPrepFormula {
+  id?: number;
+  prepItemId: number;    // ID of the item being prepared (e.g. Ayam Potong 9)
+  targetItemId: number;  // ID of the target warehouse item (e.g. Dada)
+  factor: number;        // Quantity added per 1 unit of prepItem
+}
+
 // === Database ===
 
 class PosDatabase extends Dexie {
@@ -224,6 +231,7 @@ class PosDatabase extends Dexie {
   units!: Table<Unit>;
   warehouseItems!: Table<WarehouseItem>;
   productRecipes!: Table<ProductRecipe>;
+  dailyPrepFormulas!: Table<DailyPrepFormula>;
 
   constructor() {
     super('kasirgratisan-db');
@@ -510,6 +518,25 @@ class PosDatabase extends Dexie {
         }
       });
     });
+
+    // Version 10 — Custom Daily Prep Formulas & renaming to Persiapan Harian
+    this.version(10).stores({
+      categories:       '++id, name, isDeleted',
+      products:         '++id, name, &sku, categoryId, barcode, isDeleted, createdBy, updatedBy',
+      suppliers:        '++id, name, isDeleted',
+      stockIns:         '++id, productId, supplierId, date, createdBy',
+      stockOuts:        '++id, productId, date, createdBy',
+      hppHistory:       '++id, productId, date',
+      paymentMethods:   '++id, name, category',
+      transactions:     '++id, date, &receiptNumber, paymentMethodId, status, orderNumber, createdBy',
+      transactionItems: '++id, transactionId, productId',
+      storeSettings:    '++id',
+      units:            '++id, &name, isDeleted',
+      users:            '++id, &username, role, isActive',
+      warehouseItems:   '++id, name, isDeleted, isCashierVisible, isDailyReset',
+      productRecipes:   '++id, productId, warehouseItemId',
+      dailyPrepFormulas: '++id, prepItemId, targetItemId',
+    });
   }
 }
 
@@ -604,6 +631,45 @@ export async function seedDefaultData() {
 
   // Auto-link chicken products to warehouse items if not already linked
   await autoLinkChickenRecipes();
+
+  // Seed default daily prep formulas & Ayam Potong 9
+  const now = new Date();
+  const ayamPotongItem = await db.warehouseItems.where('name').equalsIgnoreCase('Ayam Potong 9').first();
+  let ayamPotongId: number;
+  if (!ayamPotongItem) {
+    ayamPotongId = await db.warehouseItems.add({
+      name: 'Ayam Potong 9',
+      stock: 0,
+      unit: 'ekor',
+      isCashierVisible: 0,
+      isDailyReset: 1,
+      lastPreparedDate: '',
+      dailyPrepQty: 0,
+      dailyPrepFactor: 1,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now
+    });
+  } else {
+    ayamPotongId = ayamPotongItem.id!;
+  }
+
+  const formulaCount = await db.dailyPrepFormulas.count();
+  if (formulaCount === 0) {
+    const pahaBawah = await db.warehouseItems.where('name').equalsIgnoreCase('Paha Bawah').first();
+    const pahaAtas = await db.warehouseItems.where('name').equalsIgnoreCase('Paha Atas').first();
+    const sayap = await db.warehouseItems.where('name').equalsIgnoreCase('Sayap').first();
+    const dada = await db.warehouseItems.where('name').equalsIgnoreCase('Dada').first();
+
+    if (pahaBawah && pahaAtas && sayap && dada) {
+      await db.dailyPrepFormulas.bulkAdd([
+        { prepItemId: ayamPotongId, targetItemId: pahaBawah.id!, factor: 2 },
+        { prepItemId: ayamPotongId, targetItemId: pahaAtas.id!, factor: 2 },
+        { prepItemId: ayamPotongId, targetItemId: sayap.id!, factor: 2 },
+        { prepItemId: ayamPotongId, targetItemId: dada.id!, factor: 3 },
+      ]);
+    }
+  }
 }
 
 export async function autoLinkChickenRecipes() {

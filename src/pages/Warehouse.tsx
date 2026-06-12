@@ -244,83 +244,146 @@ export default function WarehousePage() {
     }
   };
 
-  // Process Daily Prep (Multi-item support)
-  const processDailyPrep = async () => {
-    const counts = parseInt(prepCount) || 0;
-    if (counts === 0) return;
+  // Formula Edit states
+  const [formulaDialog, setFormulaDialog] = useState(false);
+  const [formulaPrepItem, setFormulaPrepItem] = useState<WarehouseItem | null>(null);
+  const [newFormulaTargetId, setNewFormulaTargetId] = useState<string>('');
+  const [newFormulaFactor, setNewFormulaFactor] = useState('1');
 
+  // Load all prep formulas
+  const formulas = useLiveQuery(() => db.dailyPrepFormulas.toArray());
+
+  // Add item to formula
+  const addFormulaItem = async () => {
+    if (!formulaPrepItem || !newFormulaTargetId) return;
+    const factor = parseFloat(newFormulaFactor) || 1;
+    try {
+      await db.dailyPrepFormulas.add({
+        prepItemId: formulaPrepItem.id!,
+        targetItemId: parseInt(newFormulaTargetId),
+        factor: factor
+      });
+      setNewFormulaTargetId('');
+      setNewFormulaFactor('1');
+      toast.success('Bahan berhasil ditambahkan ke rumus');
+    } catch (err) {
+      console.error(err);
+      toast.error('Gagal menambahkan bahan ke rumus');
+    }
+  };
+
+  // Delete item from formula
+  const deleteFormulaItem = async (id: number) => {
+    try {
+      await db.dailyPrepFormulas.delete(id);
+      toast.success('Bahan dihapus dari rumus');
+    } catch (err) {
+      console.error(err);
+      toast.error('Gagal menghapus bahan dari rumus');
+    }
+  };
+
+  // Update formula multiplier factor
+  const updateFormulaFactor = async (id: number, factorStr: string) => {
+    const factor = parseFloat(factorStr) || 0;
+    try {
+      await db.dailyPrepFormulas.update(id, { factor });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Unified Prep Adjustment (Handles delta increment/decrement)
+  const handlePrepAdjustment = async (prepItemId: number, delta: number) => {
     const todayStr = new Date().toLocaleDateString('en-CA');
+    const prepItem = await db.warehouseItems.get(prepItemId);
+    if (!prepItem) return;
+
+    const isNewDay = prepItem.lastPreparedDate !== todayStr;
+    const currentPrep = isNewDay ? 0 : (prepItem.dailyPrepQty || 0);
+    const newPrep = currentPrep + delta;
+
+    if (newPrep < 0) {
+      toast.error('Jumlah persiapan tidak bisa kurang dari 0');
+      return;
+    }
 
     try {
-      if (prepItemId) {
-        // Prepare single custom item
-        const item = await db.warehouseItems.get(prepItemId);
-        if (item) {
-          const factor = item.dailyPrepFactor || 1;
-          const addQty = factor * counts;
-          const isNewDay = item.lastPreparedDate !== todayStr;
-          
-          const currentPrepQty = isNewDay ? 0 : (item.dailyPrepQty || 0);
-          const newPrepQty = Math.max(0, currentPrepQty + counts);
-          
-          let newStock = item.stock + addQty;
-          if (isNewDay) {
-            newStock = addQty;
-          } else if (newPrepQty === 0) {
-            newStock = Math.max(0, item.stock - (currentPrepQty * factor));
-          } else {
-            // Adjust based on change
-            newStock = Math.max(0, item.stock + (counts * factor));
-          }
+      // Find formula targets
+      const itemFormulas = formulas?.filter(f => f.prepItemId === prepItemId) || [];
 
-          await db.warehouseItems.update(item.id!, {
-            stock: newStock,
-            dailyPrepQty: newPrepQty,
-            lastPreparedDate: todayStr,
-            updatedAt: new Date()
-          });
-          toast.success(`Berhasil memperbarui persiapan ${item.name} harian!`);
-        }
-      } else {
-        // Standard "Ayam Potong 9" Batch (All chicken pieces)
-        const formulas = [
-          { name: 'Paha Bawah', factor: 2 },
-          { name: 'Paha Atas', factor: 2 },
-          { name: 'Sayap', factor: 2 },
-          { name: 'Dada', factor: 3 }
-        ];
+      if (itemFormulas.length > 0) {
+        // 1. Update prepItem dailyPrepQty and decrement its stock by delta
+        const newPrepItemStock = Math.max(0, prepItem.stock - delta);
+        await db.warehouseItems.update(prepItemId, {
+          stock: newPrepItemStock,
+          dailyPrepQty: newPrep,
+          lastPreparedDate: todayStr,
+          updatedAt: new Date()
+        });
 
-        for (const formula of formulas) {
-          const item = await db.warehouseItems
-            .where('name')
-            .equalsIgnoreCase(formula.name)
-            .first();
+        // 2. Update target items
+        for (const f of itemFormulas) {
+          const targetItem = await db.warehouseItems.get(f.targetItemId);
+          if (targetItem) {
+            const isTargetNewDay = targetItem.lastPreparedDate !== todayStr;
+            let newTargetStock = targetItem.stock + (delta * f.factor);
+            let newTargetPrepQty = (targetItem.dailyPrepQty || 0) + (delta * f.factor);
 
-          if (item) {
-            const addQty = formula.factor * counts;
-            const isNewDay = item.lastPreparedDate !== todayStr;
-            
-            const currentPrepQty = isNewDay ? 0 : (item.dailyPrepQty || 0);
-            const newPrepQty = Math.max(0, currentPrepQty + counts);
-            
-            let newStock = item.stock + addQty;
-            if (isNewDay) {
-              newStock = addQty;
-            } else if (newPrepQty === 0) {
-              newStock = Math.max(0, item.stock - (currentPrepQty * formula.factor));
+            if (isTargetNewDay) {
+              newTargetStock = newPrep * f.factor;
+              newTargetPrepQty = newPrep * f.factor;
             } else {
-              newStock = Math.max(0, item.stock + (counts * formula.factor));
+              newTargetStock = Math.max(0, newTargetStock);
+              newTargetPrepQty = Math.max(0, newTargetPrepQty);
             }
 
-            await db.warehouseItems.update(item.id!, {
-              stock: newStock,
-              dailyPrepQty: newPrepQty,
+            await db.warehouseItems.update(f.targetItemId, {
+              stock: newTargetStock,
+              dailyPrepQty: newTargetPrepQty,
               lastPreparedDate: todayStr,
               updatedAt: new Date()
             });
           }
         }
-        toast.success(`Berhasil memperbarui persiapan ${counts} ekor Ayam Potong 9!`);
+      } else {
+        // Simple prep item (like Es Batu) with no target items - adds to itself
+        const factor = prepItem.dailyPrepFactor || 1;
+        let newStock = prepItem.stock + (delta * factor);
+        if (isNewDay) {
+          newStock = Math.max(0, delta * factor);
+        } else {
+          newStock = Math.max(0, newStock);
+        }
+
+        await db.warehouseItems.update(prepItemId, {
+          stock: newStock,
+          dailyPrepQty: newPrep,
+          lastPreparedDate: todayStr,
+          updatedAt: new Date()
+        });
+      }
+      toast.success(`Berhasil memperbarui persiapan ${prepItem.name}`);
+    } catch (err) {
+      console.error(err);
+      toast.error('Gagal memperbarui persiapan');
+    }
+  };
+
+  // Process Daily Prep from set quantity dialog
+  const processDailyPrep = async () => {
+    if (!prepItemId) return;
+    const counts = parseInt(prepCount) || 0;
+    
+    try {
+      const todayStr = new Date().toLocaleDateString('en-CA');
+      const prepItem = await db.warehouseItems.get(prepItemId);
+      if (prepItem) {
+        const isNewDay = prepItem.lastPreparedDate !== todayStr;
+        const currentPrep = isNewDay ? 0 : (prepItem.dailyPrepQty || 0);
+        const delta = counts - currentPrep;
+        
+        await handlePrepAdjustment(prepItemId, delta);
       }
       setPrepDialog(false);
     } catch (err) {
@@ -329,106 +392,23 @@ export default function WarehousePage() {
     }
   };
 
-  // Adjust prep directly (increment / decrement by 1 batch)
-  const adjustPrepQty = async (item: WarehouseItem, delta: number) => {
-    const todayStr = new Date().toLocaleDateString('en-CA');
-    const factor = item.dailyPrepFactor || 1;
-    const isNewDay = item.lastPreparedDate !== todayStr;
-    const currentPrep = isNewDay ? 0 : (item.dailyPrepQty || 0);
-    const newPrep = currentPrep + delta;
-
-    if (newPrep < 0) {
-      toast.error('Jumlah persiapan tidak bisa kurang dari 0');
-      return;
-    }
-
-    try {
-      let newStock = item.stock + (delta * factor);
-      if (isNewDay) {
-        newStock = Math.max(0, delta * factor);
-      } else {
-        newStock = Math.max(0, newStock);
-      }
-
-      await db.warehouseItems.update(item.id!, {
-        stock: newStock,
-        dailyPrepQty: newPrep,
-        lastPreparedDate: todayStr,
-        updatedAt: new Date()
-      });
-      toast.success(`Berhasil memperbarui persiapan ${item.name}`);
-    } catch (err) {
-      console.error(err);
-      toast.error('Gagal memperbarui persiapan');
-    }
-  };
-
-  // Adjust standard Ayam Potong 9 prep count (+/-)
-  const adjustAyamPrep = async (delta: number) => {
-    const todayStr = new Date().toLocaleDateString('en-CA');
-    const formulas = [
-      { name: 'Paha Bawah', factor: 2 },
-      { name: 'Paha Atas', factor: 2 },
-      { name: 'Sayap', factor: 2 },
-      { name: 'Dada', factor: 3 }
-    ];
-    
-    // Check current prep from Paha Bawah
-    const pahaBawah = chickenItems?.find(item => item.name.toLowerCase() === 'paha bawah');
-    const currentPrep = pahaBawah && pahaBawah.lastPreparedDate === todayStr ? (pahaBawah.dailyPrepQty || 0) : 0;
-    const newPrep = currentPrep + delta;
-    if (newPrep < 0) {
-      toast.error('Jumlah persiapan tidak bisa kurang dari 0');
-      return;
-    }
-
-    try {
-      for (const formula of formulas) {
-        const item = warehouseItems?.find(wi => wi.name.toLowerCase() === formula.name.toLowerCase());
-        if (item) {
-          const isNewDay = item.lastPreparedDate !== todayStr;
-          const currentItemPrep = isNewDay ? 0 : (item.dailyPrepQty || 0);
-          const newItemPrep = Math.max(0, currentItemPrep + delta);
-          
-          let newStock = item.stock + (delta * formula.factor);
-          if (isNewDay) {
-            newStock = Math.max(0, delta * formula.factor);
-          } else {
-            newStock = Math.max(0, newStock);
-          }
-
-          await db.warehouseItems.update(item.id!, {
-            stock: newStock,
-            dailyPrepQty: newItemPrep,
-            lastPreparedDate: todayStr,
-            updatedAt: new Date()
-          });
-        }
-      }
-      toast.success(`Berhasil memperbarui persiapan Ayam Potong 9`);
-    } catch (err) {
-      console.error(err);
-      toast.error('Gagal memperbarui persiapan ayam');
-    }
-  };
-
-  // Check if chicken or custom daily resets need preparation today
   const todayStr = new Date().toLocaleDateString('en-CA');
-  const needsPrep = chickenItems && chickenItems.length > 0 && chickenItems.some(item => item.lastPreparedDate !== todayStr);
+  
+  // Calculate target item IDs from formulas to filter main list
+  const targetItemIds = new Set(formulas?.map(f => f.targetItemId) || []);
 
-  const pahaBawahItem = chickenItems?.find(item => item.name.toLowerCase() === 'paha bawah');
-  const ayamPrepQty = pahaBawahItem && pahaBawahItem.lastPreparedDate === todayStr ? (pahaBawahItem.dailyPrepQty || 0) : 0;
-
-  // Custom (non-standard chicken) prep items
-  const standardChickenNames = ['paha bawah', 'paha atas', 'sayap', 'dada'];
-  const customPrepItems = warehouseItems?.filter(item => 
-    item.isDailyReset === 1 && !standardChickenNames.includes(item.name.toLowerCase())
+  // Main prep items are those marked with isDailyReset === 1 and NOT a target of any formula
+  const mainPrepItems = warehouseItems?.filter(item => 
+    item.isDailyReset === 1 && !targetItemIds.has(item.id!)
   ) || [];
+
+  const needsPrep = mainPrepItems.some(item => item.lastPreparedDate !== todayStr);
 
   const prepItemName = prepItemId ? warehouseItems?.find(wi => wi.id === prepItemId)?.name : '';
   const prepItemUnit = prepItemId ? warehouseItems?.find(wi => wi.id === prepItemId)?.unit : '';
   const prepItemFactor = prepItemId ? (warehouseItems?.find(wi => wi.id === prepItemId)?.dailyPrepFactor || 1) : 1;
 
+  // Render main body
   return (
     <div className="px-4 pt-6 pb-24 space-y-5">
       <div className="flex items-center gap-3">
@@ -596,140 +576,132 @@ export default function WarehousePage() {
               </div>
             )}
           </div>
-        </TabsContent>
-
-        {/* Tab 3: Persiapan Harian */}
+        </TabsContent>        {/* Tab 3: Persiapan Harian */}
         <TabsContent value="daily" className="mt-4 space-y-4">
-          {/* Section 1: Ayam Potong 9 */}
-          {chickenItems && chickenItems.length > 0 && (
-            <Card className="border-0 shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm flex items-center gap-1.5 justify-between">
-                  <span className="flex items-center gap-1.5"><Layers className="w-4 h-4 text-primary" /> Persiapan Ayam Potong 9</span>
-                  <Badge variant={ayamPrepQty > 0 ? "outline" : "destructive"} className="text-[10px]">
-                    {ayamPrepQty > 0 ? `Sudah Persiapan: ${ayamPrepQty} Ekor` : 'Belum Persiapan'}
-                  </Badge>
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  SOP Pemotongan Ayam Sabana: 1 ekor ayam menghasilkan 2 Paha Bawah, 2 Paha Atas, 2 Sayap, dan 3 Dada.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between p-3 bg-muted/40 rounded-xl">
-                  <div className="space-y-0.5">
-                    <span className="text-xs text-muted-foreground">Total Ayam Dipersiapkan</span>
-                    <p className="text-lg font-bold">{ayamPrepQty} Ekor</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button 
-                      variant="outline" 
-                      size="icon" 
-                      onClick={() => adjustAyamPrep(-1)}
-                      className="w-9 h-9"
-                    >
-                      <Minus className="w-4 h-4" />
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="icon" 
-                      onClick={() => adjustAyamPrep(1)}
-                      className="w-9 h-9"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </Button>
-                    <Button 
-                      size="sm"
-                      onClick={() => { setPrepItemId(null); setPrepCount('1'); setPrepDialog(true); }}
-                      className="text-xs h-9"
-                    >
-                      Set Jumlah
-                    </Button>
-                  </div>
-                </div>
+          <div className="bg-white dark:bg-card p-4 rounded-xl shadow-sm border border-muted/40 space-y-1">
+            <h3 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+              <Scale className="w-4 h-4 text-primary" />
+              Persiapan Harian Mandiri
+            </h3>
+            <p className="text-[11px] text-muted-foreground">
+              Daftar barang gudang custom yang perlu dipersiapkan saat opening toko.
+            </p>
+          </div>
+          <div className="space-y-4">
+            {mainPrepItems.map(item => {
+              const prepQty = item.lastPreparedDate === todayStr ? (item.dailyPrepQty || 0) : 0;
+              const itemFormulas = formulas?.filter(f => f.prepItemId === item.id) || [];
 
-                <div className="grid grid-cols-2 gap-3">
-                  {chickenItems?.map(item => (
-                    <div key={item.id} className="p-3 bg-muted/30 rounded-lg flex flex-col justify-between h-16 border">
-                      <span className="text-xs font-semibold text-muted-foreground">{item.name}</span>
-                      <div className="flex justify-between items-baseline">
-                        <span className="text-sm font-bold">{item.stock} {item.unit}</span>
-                        {item.lastPreparedDate === todayStr && item.dailyPrepQty ? (
-                          <span className="text-[10px] text-primary-foreground bg-primary px-1.5 py-0.5 rounded font-medium">
-                            +{item.dailyPrepQty * (item.name.toLowerCase() === 'dada' ? 3 : 2)} pcs hari ini
-                          </span>
-                        ) : null}
+              return (
+                <Card key={item.id} className="border-0 shadow-sm overflow-hidden">
+                  <CardHeader className="p-4 pb-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-muted border flex items-center justify-center overflow-hidden shrink-0">
+                          {item.photo ? (
+                            <img src={item.photo} alt={item.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <Layers className="w-5 h-5 text-primary" />
+                          )}
+                        </div>
+                        <div>
+                          <CardTitle className="text-sm font-bold">{item.name}</CardTitle>
+                          <CardDescription className="text-xs">
+                            Sisa Stok Bahan: <strong className="text-foreground">{item.stock} {item.unit}</strong>
+                          </CardDescription>
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="h-8 text-xs font-semibold gap-1"
+                          onClick={() => {
+                            setFormulaPrepItem(item);
+                            setFormulaDialog(true);
+                          }}
+                        >
+                          <Edit2 className="w-3 h-3" /> Edit Rumus
+                        </Button>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Section 2: Persiapan Mandiri / Lainnya */}
-          <Card className="border-0 shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-1.5"><Scale className="w-4 h-4 text-primary" /> Persiapan Harian Mandiri</CardTitle>
-              <CardDescription className="text-xs">
-                Daftar barang gudang custom yang perlu dipersiapkan saat opening toko (misal: Es Batu, Bumbu, dll).
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="divide-y divide-border">
-                {customPrepItems.map(item => {
-                  const prepQty = item.lastPreparedDate === todayStr ? (item.dailyPrepQty || 0) : 0;
-                  return (
-                    <div key={item.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 first:pt-0 last:pb-0">
+                  </CardHeader>
+                  <CardContent className="p-4 pt-0 space-y-4">
+                    <div className="flex items-center justify-between p-3 bg-muted/40 rounded-xl">
                       <div className="space-y-0.5">
-                        <span className="text-xs font-bold text-foreground">{item.name}</span>
-                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                          <span>Stok: <strong>{item.stock} {item.unit}</strong></span>
-                          <span>•</span>
-                          <span>Faktor Pengali: <strong>{item.dailyPrepFactor || 1}</strong></span>
-                        </div>
+                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Total Dipersiapkan</span>
+                        <p className="text-lg font-bold">{prepQty} Kali</p>
                       </div>
-                      <div className="flex items-center gap-3 justify-between sm:justify-end">
-                        <span className="text-xs font-medium text-muted-foreground">
-                          Dipersiapkan: <strong className="text-foreground text-sm">{prepQty}</strong> kali
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          <Button 
-                            variant="outline" 
-                            size="icon" 
-                            onClick={() => adjustPrepQty(item, -1)}
-                            className="w-8 h-8"
-                          >
-                            <Minus className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button 
-                            variant="outline" 
-                            size="icon" 
-                            onClick={() => adjustPrepQty(item, 1)}
-                            className="w-8 h-8"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button 
-                            variant="ghost"
-                            size="sm" 
-                            onClick={() => { setPrepItemId(item.id!); setPrepCount('1'); setPrepDialog(true); }}
-                            className="text-[11px] h-8 px-2 hover:bg-muted"
-                          >
-                            Set Qty
-                          </Button>
-                        </div>
+                      <div className="flex items-center gap-1.5">
+                        <Button 
+                          variant="outline" 
+                          size="icon" 
+                          onClick={() => handlePrepAdjustment(item.id!, -1)}
+                          className="w-9 h-9"
+                          disabled={prepQty <= 0}
+                        >
+                          <Minus className="w-4 h-4" />
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="icon" 
+                          onClick={() => handlePrepAdjustment(item.id!, 1)}
+                          className="w-9 h-9"
+                        >
+                          <Plus className="w-4 h-4" />
+                        </Button>
+                        <Button 
+                          variant="ghost"
+                          size="sm" 
+                          onClick={() => { 
+                            setPrepItemId(item.id!); 
+                            setPrepCount(prepQty.toString()); 
+                            setPrepDialog(true); 
+                          }}
+                          className="text-xs h-9 px-2.5 hover:bg-muted"
+                        >
+                          Set Qty
+                        </Button>
                       </div>
                     </div>
-                  );
-                })}
-                {customPrepItems.length === 0 && (
-                  <div className="py-6 text-center text-xs text-muted-foreground">
-                    Belum ada barang persiapan mandiri. Edit barang gudang dan centang "Masuk Persiapan Harian?".
-                  </div>
-                )}
+
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Hasil Output Persiapan:</span>
+                      {itemFormulas.length > 0 ? (
+                        <div className="grid grid-cols-2 gap-2">
+                          {itemFormulas.map(f => {
+                            const targetItem = warehouseItems?.find(wi => wi.id === f.targetItemId);
+                            return (
+                              <div key={f.id} className="p-2.5 bg-muted/20 border rounded-lg flex flex-col justify-between">
+                                <span className="text-[11px] font-semibold text-muted-foreground truncate">{targetItem?.name || `Bahan #${f.targetItemId}`}</span>
+                                <div className="flex justify-between items-baseline mt-1">
+                                  <span className="text-xs font-bold">{targetItem?.stock || 0} {targetItem?.unit || 'pcs'}</span>
+                                  <Badge className="text-[9px] bg-primary/10 text-primary hover:bg-primary/20 border-0">
+                                    +{prepQty * f.factor} ({f.factor}x)
+                                  </Badge>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-muted/20 border rounded-lg flex justify-between items-center text-xs text-muted-foreground">
+                          <span>Menambahkan stok ke diri sendiri</span>
+                          <span className="font-semibold text-foreground">+{prepQty * (item.dailyPrepFactor || 1)} {item.unit}</span>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+
+            {mainPrepItems.length === 0 && (
+              <div className="py-12 text-center text-xs text-muted-foreground">
+                Belum ada bahan baku untuk Persiapan Harian. Edit bahan baku pada tab "Stok Barang" lalu aktifkan switch "Masuk Persiapan Harian?".
               </div>
-            </CardContent>
-          </Card>
+            )}
+          </div>
         </TabsContent>
       </Tabs>
 
@@ -891,40 +863,142 @@ export default function WarehousePage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-1.5">
               <Layers className="w-5 h-5 text-primary" /> 
-              {prepItemId ? `Persiapan ${prepItemName}` : 'Persiapan Ayam Potong 9'}
+              Persiapan {prepItemName}
             </DialogTitle>
             <DialogDescription className="text-xs">
-              {prepItemId 
-                ? `Masukkan berapa unit ${prepItemName} yang Anda persiapkan hari ini.` 
-                : 'Masukkan berapa ekor Ayam Potong 9 yang Anda siapkan hari ini. Stok potongan ayam akan di-reset (ganti hari) dan diisi ulang sesuai rumus.'}
+              Masukkan berapa unit {prepItemName} yang Anda persiapkan hari ini.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 mt-2">
             <div className="space-y-1.5">
-              <Label>{prepItemId ? 'Jumlah Unit Persiapan' : 'Jumlah Ekor Ayam'}</Label>
-              <Input type="number" value={prepCount} onChange={e => setPrepCount(e.target.value)} className="h-11 text-center text-lg font-bold" min={1} />
+              <Label>Jumlah Unit Persiapan</Label>
+              <Input type="number" value={prepCount} onChange={e => setPrepCount(e.target.value)} className="h-11 text-center text-lg font-bold" min={0} />
             </div>
 
             <div className="text-xs text-muted-foreground p-3 bg-muted rounded-xl space-y-1">
               <span className="font-semibold text-foreground">Hasil Persiapan:</span>
-              {prepItemId ? (
-                <div>Total penambahan stok: {(parseInt(prepCount) || 0) * prepItemFactor} {prepItemUnit}</div>
-              ) : (
-                <div className="grid grid-cols-2 gap-1 mt-1 text-[11px]">
-                  <div>Paha Bawah: {(parseInt(prepCount) || 0) * 2} pcs</div>
-                  <div>Paha Atas: {(parseInt(prepCount) || 0) * 2} pcs</div>
-                  <div>Sayap: {(parseInt(prepCount) || 0) * 2} pcs</div>
-                  <div>Dada: {(parseInt(prepCount) || 0) * 3} pcs</div>
-                </div>
-              )}
+              {(() => {
+                const itemFormulas = formulas?.filter(f => f.prepItemId === prepItemId) || [];
+                if (itemFormulas.length > 0) {
+                  return (
+                    <div className="grid grid-cols-2 gap-1 mt-1 text-[11px]">
+                      {itemFormulas.map(f => {
+                        const targetItem = warehouseItems?.find(wi => wi.id === f.targetItemId);
+                        return (
+                          <div key={f.id}>{targetItem?.name || `Bahan #${f.targetItemId}`}: {(parseInt(prepCount) || 0) * f.factor} {targetItem?.unit || 'pcs'}</div>
+                        );
+                      })}
+                    </div>
+                  );
+                } else {
+                  return (
+                    <div>Total penambahan stok: {(parseInt(prepCount) || 0) * prepItemFactor} {prepItemUnit}</div>
+                  );
+                }
+              })()}
             </div>
 
-            <Button className="w-full h-11 font-semibold" onClick={processDailyPrep} disabled={(parseInt(prepCount) || 0) <= 0}>
+            <Button className="w-full h-11 font-semibold" onClick={processDailyPrep} disabled={(parseInt(prepCount) || 0) < 0}>
               Proses Persiapan
             </Button>
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Formula Editor Dialog */}
+      <Dialog open={formulaDialog} onOpenChange={setFormulaDialog}>
+        <DialogContent className="max-w-[95vw] rounded-xl sm:max-w-[450px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-1.5">
+              <Layers className="w-5 h-5 text-primary" />
+              Edit Rumus: {formulaPrepItem?.name}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Tentukan barang apa saja yang bertambah stoknya ketika {formulaPrepItem?.name} dipersiapkan beserta faktor pengalinya.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-2 max-h-[60vh] overflow-y-auto pr-1">
+            {/* List of current targets in the formula */}
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold">Bahan Output Saat Ini</Label>
+              <div className="space-y-2">
+                {formulas?.filter(f => f.prepItemId === formulaPrepItem?.id).map(f => {
+                  const targetItem = warehouseItems?.find(wi => wi.id === f.targetItemId);
+                  return (
+                    <div key={f.id} className="flex items-center justify-between gap-3 p-2 bg-muted/40 rounded-lg border text-xs">
+                      <span className="font-semibold truncate flex-1">{targetItem?.name || `Bahan #${f.targetItemId}`}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[10px] text-muted-foreground">Faktor:</span>
+                        <Input 
+                          type="number" 
+                          step="any"
+                          value={f.factor} 
+                          onChange={e => updateFormulaFactor(f.id!, e.target.value)} 
+                          className="w-16 h-8 text-center text-xs p-1"
+                        />
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="w-8 h-8 text-destructive hover:bg-destructive/10" 
+                          onClick={() => deleteFormulaItem(f.id!)}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {formulas?.filter(f => f.prepItemId === formulaPrepItem?.id).length === 0 && (
+                  <p className="text-xs text-muted-foreground italic text-center py-2">
+                    Belum ada rumus bahan output. Stok persiapan akan ditambahkan ke diri sendiri.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Add new target form */}
+            <div className="border-t pt-3 space-y-3">
+              <Label className="text-xs font-semibold">Tambah Bahan Output</Label>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <span className="text-[10px] text-muted-foreground">Pilih Barang Gudang</span>
+                  <Select value={newFormulaTargetId} onValueChange={setNewFormulaTargetId}>
+                    <SelectTrigger className="h-10 text-xs">
+                      <SelectValue placeholder="Pilih Bahan" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {warehouseItems
+                        ?.filter(wi => wi.id !== formulaPrepItem?.id)
+                        .map(item => (
+                          <SelectItem key={item.id} value={item.id!.toString()} className="text-xs">
+                            {item.name} ({item.unit})
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <span className="text-[10px] text-muted-foreground">Faktor Pengali</span>
+                  <Input 
+                    type="number" 
+                    step="any"
+                    value={newFormulaFactor} 
+                    onChange={e => setNewFormulaFactor(e.target.value)} 
+                    className="h-10 text-xs"
+                  />
+                </div>
+              </div>
+              <Button 
+                onClick={addFormulaItem} 
+                disabled={!newFormulaTargetId} 
+                className="w-full h-10 text-xs font-semibold gap-1.5"
+              >
+                <Plus className="w-4 h-4" /> Tambah ke Rumus
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>log>
     </div>
   );
 }
