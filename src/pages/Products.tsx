@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Product, type Category, autoLinkChickenRecipes } from '@/lib/db';
+import { db, type Product, type Category, type ProductOption, type ProductOptionGroup, autoLinkChickenRecipes, upsertProductOptionRecipe } from '@/lib/db';
 import { useState, useRef } from 'react';
-import { Plus, Search, Edit2, Trash2, Package as PackageIcon, Camera, X, Copy } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Package as PackageIcon, Camera, X, Settings2, Layers, Link as LinkIcon } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,6 +25,13 @@ export default function Produk() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [editProduct, setEditProduct] = useState<Product | null>(null);
+  const [optionProduct, setOptionProduct] = useState<Product | null>(null);
+  const [optionGroupDialog, setOptionGroupDialog] = useState(false);
+  const [optionDialog, setOptionDialog] = useState(false);
+  const [recipeDialog, setRecipeDialog] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<ProductOptionGroup | null>(null);
+  const [editingOption, setEditingOption] = useState<ProductOption | null>(null);
+  const [recipeOption, setRecipeOption] = useState<ProductOption | null>(null);
 
   // Form state
   const [name, setName] = useState('');
@@ -37,12 +44,26 @@ export default function Produk() {
   const [barcode, setBarcode] = useState('');
   const [description, setDescription] = useState('');
   const [photo, setPhoto] = useState<string | undefined>(undefined);
+  const [groupName, setGroupName] = useState('');
+  const [groupRequired, setGroupRequired] = useState(true);
+  const [groupMin, setGroupMin] = useState('1');
+  const [groupMax, setGroupMax] = useState('1');
+  const [optionGroupId, setOptionGroupId] = useState('');
+  const [optionName, setOptionName] = useState('');
+  const [optionPriceDelta, setOptionPriceDelta] = useState('');
+  const [optionHppDelta, setOptionHppDelta] = useState('');
+  const [optionDefault, setOptionDefault] = useState(false);
+  const [recipeWarehouseItemId, setRecipeWarehouseItemId] = useState('');
+  const [recipeQty, setRecipeQty] = useState('1');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const products = useLiveQuery(() => db.products.where('isDeleted').equals(0).toArray());
   const categories = useLiveQuery(() => db.categories.where('isDeleted').equals(0).toArray());
   const units = useLiveQuery(() => db.units.where('isDeleted').equals(0).toArray());
   const productRecipes = useLiveQuery(() => db.productRecipes.toArray());
+  const productOptionGroups = useLiveQuery(() => db.productOptionGroups.toArray());
+  const productOptions = useLiveQuery(() => db.productOptions.toArray());
+  const productOptionRecipes = useLiveQuery(() => db.productOptionRecipes.toArray());
   const visibleWarehouseItems = useLiveQuery(() => db.warehouseItems.where('isDeleted').equals(0).toArray());
 
   // Compose dropdown options: active master units + current product's unit if it has been deleted/renamed
@@ -93,6 +114,22 @@ export default function Produk() {
   const getCategoryName = (catId: number) => categories?.find(c => c.id === catId)?.name ?? '-';
   const getCategoryColor = (catId: number) => categories?.find(c => c.id === catId)?.color ?? '#999';
 
+  const getProductGroups = (productId?: number) => (productOptionGroups ?? [])
+    .filter(group => group.productId === productId && group.isDeleted === 0)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  const getGroupOptions = (groupId?: number) => (productOptions ?? [])
+    .filter(option => option.groupId === groupId && option.isDeleted === 0)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  const getOptionRecipes = (optionId?: number) => (productOptionRecipes ?? [])
+    .filter(recipe => recipe.optionId === optionId);
+
+  const getWarehouseName = (warehouseItemId: number) => {
+    const item = visibleWarehouseItems?.find(wi => wi.id === warehouseItemId);
+    return item ? `${item.name} (${item.unit})` : `Bahan #${warehouseItemId}`;
+  };
+
 
   const openAdd = () => {
     setEditProduct(null);
@@ -104,6 +141,154 @@ export default function Produk() {
     setEditProduct(p);
     setName(p.name); setSku(p.sku); setCategoryId(p.categoryId.toString()); setPrice(p.price.toString()); setHpp(p.hpp.toString()); setStock(p.stock.toString()); setUnit(p.unit); setBarcode(p.barcode ?? ''); setDescription(p.description ?? ''); setPhoto(p.photo);
     setDialogOpen(true);
+  };
+
+  const openOptions = (p: Product) => {
+    setOptionProduct(p);
+  };
+
+  const openGroupAdd = () => {
+    if (!optionProduct?.id) return;
+    setEditingGroup(null);
+    setGroupName('');
+    setGroupRequired(true);
+    setGroupMin('1');
+    setGroupMax('1');
+    setOptionGroupDialog(true);
+  };
+
+  const openGroupEdit = (group: ProductOptionGroup) => {
+    setEditingGroup(group);
+    setGroupName(group.name);
+    setGroupRequired(group.required === 1);
+    setGroupMin(String(group.minSelect));
+    setGroupMax(String(group.maxSelect));
+    setOptionGroupDialog(true);
+  };
+
+  const saveOptionGroup = async () => {
+    if (!optionProduct?.id || !groupName.trim()) return;
+    const now = new Date();
+    const minSelect = Math.max(0, Number(groupMin) || 0);
+    const maxSelect = Math.max(minSelect || 1, Number(groupMax) || 1);
+
+    if (editingGroup?.id) {
+      await db.productOptionGroups.update(editingGroup.id, {
+        name: groupName.trim(),
+        required: groupRequired ? 1 : 0,
+        minSelect: groupRequired ? Math.max(1, minSelect) : minSelect,
+        maxSelect,
+        updatedAt: now,
+      });
+    } else {
+      const sortOrder = getProductGroups(optionProduct.id).length;
+      await db.productOptionGroups.add({
+        productId: optionProduct.id,
+        name: groupName.trim(),
+        required: groupRequired ? 1 : 0,
+        minSelect: groupRequired ? Math.max(1, minSelect) : minSelect,
+        maxSelect,
+        sortOrder,
+        isDeleted: 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    setOptionGroupDialog(false);
+  };
+
+  const deleteOptionGroup = async (group: ProductOptionGroup) => {
+    if (!group.id || !confirm(`Hapus grup opsi "${group.name}"?`)) return;
+    const optionIds = getGroupOptions(group.id).map(option => option.id!).filter(Boolean);
+    await db.productOptionGroups.update(group.id, { isDeleted: 1, updatedAt: new Date() });
+    for (const optionId of optionIds) {
+      await db.productOptions.update(optionId, { isDeleted: 1, updatedAt: new Date() });
+    }
+    toast.success('Grup opsi dihapus');
+  };
+
+  const openOptionAdd = (group: ProductOptionGroup) => {
+    setEditingOption(null);
+    setOptionGroupId(String(group.id));
+    setOptionName('');
+    setOptionPriceDelta('');
+    setOptionHppDelta('');
+    setOptionDefault(false);
+    setOptionDialog(true);
+  };
+
+  const openOptionEdit = (option: ProductOption) => {
+    setEditingOption(option);
+    setOptionGroupId(String(option.groupId));
+    setOptionName(option.name);
+    setOptionPriceDelta(String(option.priceDelta || 0));
+    setOptionHppDelta(String(option.hppDelta || 0));
+    setOptionDefault(option.isDefault === 1);
+    setOptionDialog(true);
+  };
+
+  const saveOption = async () => {
+    if (!optionGroupId || !optionName.trim()) return;
+    const now = new Date();
+    const groupId = Number(optionGroupId);
+
+    if (optionDefault) {
+      const siblingOptions = getGroupOptions(groupId);
+      for (const sibling of siblingOptions) {
+        if (sibling.id && sibling.id !== editingOption?.id) {
+          await db.productOptions.update(sibling.id, { isDefault: 0, updatedAt: now });
+        }
+      }
+    }
+
+    const data = {
+      groupId,
+      name: optionName.trim(),
+      priceDelta: Number(optionPriceDelta) || 0,
+      hppDelta: Number(optionHppDelta) || 0,
+      isDefault: optionDefault ? 1 : 0,
+      updatedAt: now,
+    };
+
+    if (editingOption?.id) {
+      await db.productOptions.update(editingOption.id, data);
+    } else {
+      const sortOrder = getGroupOptions(groupId).length;
+      await db.productOptions.add({
+        ...data,
+        sortOrder,
+        isDeleted: 0,
+        createdAt: now,
+      });
+    }
+    setOptionDialog(false);
+  };
+
+  const deleteOption = async (option: ProductOption) => {
+    if (!option.id || !confirm(`Hapus opsi "${option.name}"?`)) return;
+    await db.productOptions.update(option.id, { isDeleted: 1, updatedAt: new Date() });
+    await db.productOptionRecipes.where('optionId').equals(option.id).delete();
+    toast.success('Opsi dihapus');
+  };
+
+  const openRecipeDialog = (option: ProductOption) => {
+    setRecipeOption(option);
+    setRecipeWarehouseItemId('');
+    setRecipeQty('1');
+    setRecipeDialog(true);
+  };
+
+  const saveOptionRecipe = async () => {
+    if (!recipeOption?.id || !recipeWarehouseItemId) return;
+    await upsertProductOptionRecipe(recipeOption.id, Number(recipeWarehouseItemId), Number(recipeQty) || 1);
+    setRecipeWarehouseItemId('');
+    setRecipeQty('1');
+    toast.success('Bahan opsi disimpan');
+  };
+
+  const deleteOptionRecipe = async (recipeId?: number) => {
+    if (!recipeId) return;
+    await db.productOptionRecipes.delete(recipeId);
   };
 
   const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -272,10 +457,13 @@ export default function Produk() {
                   <div className="flex flex-col gap-1">
                     {canManage ? (
                       <>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(p)}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Edit ${p.name}`} onClick={() => openEdit(p)}>
                           <Edit2 className="w-3.5 h-3.5" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setDeleteId(p.id!)}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Opsi ${p.name}`} onClick={() => openOptions(p)}>
+                          <Settings2 className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" aria-label={`Hapus ${p.name}`} onClick={() => setDeleteId(p.id!)}>
                           <Trash2 className="w-3.5 h-3.5" />
                         </Button>
                       </>
@@ -411,6 +599,213 @@ export default function Produk() {
               {editProduct ? 'Simpan Perubahan' : 'Tambah Produk'}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Product Options Dialog */}
+      <Dialog open={!!optionProduct} onOpenChange={(open) => { if (!open) setOptionProduct(null); }}>
+        <DialogContent className="max-w-[95vw] rounded-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Opsi Produk</DialogTitle>
+          </DialogHeader>
+          {optionProduct && (
+            <div className="space-y-4 mt-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold truncate">{optionProduct.name}</p>
+                  <p className="text-xs text-muted-foreground">Harga dasar Rp {optionProduct.price.toLocaleString('id-ID')}</p>
+                </div>
+                <Button size="sm" className="h-9 gap-1.5" onClick={openGroupAdd}>
+                  <Plus className="w-4 h-4" />
+                  Grup
+                </Button>
+              </div>
+
+              {getProductGroups(optionProduct.id).length === 0 ? (
+                <div className="py-10 text-center text-xs text-muted-foreground">
+                  Belum ada opsi untuk produk ini.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {getProductGroups(optionProduct.id).map(group => (
+                    <div key={group.id} className="border rounded-lg p-3 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-bold">{group.name}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {group.required ? 'Wajib' : 'Opsional'} · pilih {group.minSelect}-{group.maxSelect}
+                          </p>
+                        </div>
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openGroupEdit(group)}>
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => deleteOptionGroup(group)}>
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        {getGroupOptions(group.id).map(option => {
+                          const recipes = getOptionRecipes(option.id);
+                          return (
+                            <div key={option.id} className="rounded-lg bg-muted/40 p-2.5 space-y-2">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <p className="text-xs font-semibold truncate">{option.name}</p>
+                                    {option.isDefault === 1 && <Badge className="h-4 text-[9px]">Default</Badge>}
+                                  </div>
+                                  <p className="text-[11px] text-muted-foreground">
+                                    +Rp {(option.priceDelta || 0).toLocaleString('id-ID')} · HPP +Rp {(option.hppDelta || 0).toLocaleString('id-ID')}
+                                  </p>
+                                </div>
+                                <div className="flex gap-1">
+                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openRecipeDialog(option)}>
+                                    <LinkIcon className="w-3.5 h-3.5" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openOptionEdit(option)}>
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteOption(option)}>
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                </div>
+                              </div>
+                              {recipes.length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                  {recipes.map(recipe => (
+                                    <Badge key={recipe.id} variant="outline" className="text-[10px]">
+                                      {getWarehouseName(recipe.warehouseItemId)} -{recipe.quantity}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <Button variant="outline" size="sm" className="w-full h-9 text-xs gap-1.5" onClick={() => openOptionAdd(group)}>
+                        <Plus className="w-3.5 h-3.5" />
+                        Tambah Opsi
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Option Group Dialog */}
+      <Dialog open={optionGroupDialog} onOpenChange={setOptionGroupDialog}>
+        <DialogContent className="max-w-[95vw] rounded-xl">
+          <DialogHeader>
+            <DialogTitle>{editingGroup ? 'Edit Grup Opsi' : 'Tambah Grup Opsi'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="space-y-1.5">
+              <Label>Nama Grup</Label>
+              <Input value={groupName} onChange={e => setGroupName(e.target.value)} placeholder="Contoh: Jenis Paket, Potongan Ayam" className="h-11" />
+            </div>
+            <button type="button" onClick={() => setGroupRequired(v => !v)} className={cn('w-full p-3 rounded-lg border text-left text-sm', groupRequired ? 'border-primary bg-primary/5' : 'border-border bg-muted/30')}>
+              <span className="font-semibold">{groupRequired ? 'Wajib dipilih' : 'Opsional'}</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">Atur apakah kasir harus memilih opsi dari grup ini.</span>
+            </button>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Minimal Pilihan</Label>
+                <Input type="number" value={groupMin} onChange={e => setGroupMin(e.target.value)} className="h-11" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Maksimal Pilihan</Label>
+                <Input type="number" value={groupMax} onChange={e => setGroupMax(e.target.value)} className="h-11" />
+              </div>
+            </div>
+            <Button className="w-full h-11" onClick={saveOptionGroup} disabled={!groupName.trim()}>
+              Simpan Grup
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Option Dialog */}
+      <Dialog open={optionDialog} onOpenChange={setOptionDialog}>
+        <DialogContent className="max-w-[95vw] rounded-xl">
+          <DialogHeader>
+            <DialogTitle>{editingOption ? 'Edit Opsi' : 'Tambah Opsi'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="space-y-1.5">
+              <Label>Nama Opsi</Label>
+              <Input value={optionName} onChange={e => setOptionName(e.target.value)} placeholder="Contoh: Paket Nasi, Paha Bawah, Sambal Ijo" className="h-11" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Tambah Harga</Label>
+                <Input type="number" value={optionPriceDelta} onChange={e => setOptionPriceDelta(e.target.value)} className="h-11" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Tambah HPP</Label>
+                <Input type="number" value={optionHppDelta} onChange={e => setOptionHppDelta(e.target.value)} className="h-11" />
+              </div>
+            </div>
+            <button type="button" onClick={() => setOptionDefault(v => !v)} className={cn('w-full p-3 rounded-lg border text-left text-sm', optionDefault ? 'border-primary bg-primary/5' : 'border-border bg-muted/30')}>
+              <span className="font-semibold">Jadikan default</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">Opsi ini otomatis terpilih saat kasir membuka produk.</span>
+            </button>
+            <Button className="w-full h-11" onClick={saveOption} disabled={!optionName.trim()}>
+              Simpan Opsi
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Option Recipe Dialog */}
+      <Dialog open={recipeDialog} onOpenChange={setRecipeDialog}>
+        <DialogContent className="max-w-[95vw] rounded-xl">
+          <DialogHeader>
+            <DialogTitle>Resep Opsi</DialogTitle>
+          </DialogHeader>
+          {recipeOption && (
+            <div className="space-y-4 mt-2">
+              <div className="p-3 bg-muted/40 rounded-lg">
+                <p className="text-xs text-muted-foreground">Opsi</p>
+                <p className="text-sm font-semibold">{recipeOption.name}</p>
+              </div>
+              <div className="grid grid-cols-[1fr_90px] gap-2">
+                <Select value={recipeWarehouseItemId} onValueChange={setRecipeWarehouseItemId}>
+                  <SelectTrigger className="h-11"><SelectValue placeholder="Pilih bahan" /></SelectTrigger>
+                  <SelectContent>
+                    {visibleWarehouseItems?.map(item => (
+                      <SelectItem key={item.id} value={item.id!.toString()}>{item.name} ({item.unit})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input type="number" value={recipeQty} onChange={e => setRecipeQty(e.target.value)} className="h-11" />
+              </div>
+              <Button variant="outline" className="w-full h-10 gap-1.5" onClick={saveOptionRecipe} disabled={!recipeWarehouseItemId}>
+                <Layers className="w-4 h-4" />
+                Tambah Bahan
+              </Button>
+              <div className="space-y-2">
+                {getOptionRecipes(recipeOption.id).map(recipe => (
+                  <div key={recipe.id} className="flex items-center justify-between p-2.5 rounded-lg bg-muted/40 text-xs">
+                    <span>{getWarehouseName(recipe.warehouseItemId)}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold">-{recipe.quantity}</span>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteOptionRecipe(recipe.id)}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

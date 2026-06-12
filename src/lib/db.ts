@@ -148,6 +148,9 @@ export interface TransactionItemRecord {
   transactionId: number;
   productId: number;
   productName: string;
+  productBaseName?: string;
+  selectedOptions?: CartOptionSnapshot[];
+  stockKey?: string;
   quantity: number;
   price: number;
   hpp: number;
@@ -207,6 +210,48 @@ export interface ProductRecipe {
   quantity: number; // quantity of warehouse item consumed
 }
 
+export interface ProductOptionGroup {
+  id?: number;
+  productId: number;
+  name: string;
+  required: number;
+  minSelect: number;
+  maxSelect: number;
+  sortOrder: number;
+  isDeleted: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ProductOption {
+  id?: number;
+  groupId: number;
+  name: string;
+  priceDelta: number;
+  hppDelta: number;
+  sortOrder: number;
+  isDefault: number;
+  isDeleted: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ProductOptionRecipe {
+  id?: number;
+  optionId: number;
+  warehouseItemId: number;
+  quantity: number;
+}
+
+export interface CartOptionSnapshot {
+  groupId: number;
+  groupName: string;
+  optionId: number;
+  optionName: string;
+  priceDelta: number;
+  hppDelta: number;
+}
+
 export interface DailyPrepFormula {
   id?: number;
   prepItemId: number;    // ID of the item being prepared (e.g. Ayam Potong 9)
@@ -231,6 +276,9 @@ class PosDatabase extends Dexie {
   units!: Table<Unit>;
   warehouseItems!: Table<WarehouseItem>;
   productRecipes!: Table<ProductRecipe>;
+  productOptionGroups!: Table<ProductOptionGroup>;
+  productOptions!: Table<ProductOption>;
+  productOptionRecipes!: Table<ProductOptionRecipe>;
   dailyPrepFormulas!: Table<DailyPrepFormula>;
 
   constructor() {
@@ -580,6 +628,28 @@ class PosDatabase extends Dexie {
         }
       }
     });
+
+    // Version 12 - Product option groups, variants, bundles, and option-level recipes
+    this.version(12).stores({
+      categories:       '++id, name, isDeleted',
+      products:         '++id, name, &sku, categoryId, barcode, isDeleted, createdBy, updatedBy',
+      suppliers:        '++id, name, isDeleted',
+      stockIns:         '++id, productId, supplierId, date, createdBy',
+      stockOuts:        '++id, productId, date, createdBy',
+      hppHistory:       '++id, productId, date',
+      paymentMethods:   '++id, name, category',
+      transactions:     '++id, date, &receiptNumber, paymentMethodId, status, orderNumber, createdBy',
+      transactionItems: '++id, transactionId, productId, stockKey',
+      storeSettings:    '++id',
+      units:            '++id, &name, isDeleted',
+      users:            '++id, &username, role, isActive',
+      warehouseItems:   '++id, name, isDeleted, isCashierVisible, isDailyReset',
+      productRecipes:   '++id, productId, warehouseItemId, [productId+warehouseItemId]',
+      dailyPrepFormulas: '++id, prepItemId, targetItemId, [prepItemId+targetItemId]',
+      productOptionGroups: '++id, productId, isDeleted, [productId+sortOrder]',
+      productOptions: '++id, groupId, isDeleted, [groupId+sortOrder]',
+      productOptionRecipes: '++id, optionId, warehouseItemId, [optionId+warehouseItemId]',
+    });
   }
 }
 
@@ -597,6 +667,77 @@ export async function upsertProductRecipe(productId: number, warehouseItemId: nu
   }
 
   return db.productRecipes.add({ productId, warehouseItemId, quantity });
+}
+
+export async function upsertProductOptionRecipe(optionId: number, warehouseItemId: number, quantity: number) {
+  const existing = await db.productOptionRecipes
+    .where('[optionId+warehouseItemId]')
+    .equals([optionId, warehouseItemId])
+    .first();
+
+  if (existing?.id) {
+    await db.productOptionRecipes.update(existing.id, { quantity });
+    return existing.id;
+  }
+
+  return db.productOptionRecipes.add({ optionId, warehouseItemId, quantity });
+}
+
+export async function getProductOptionConfig(productId: number) {
+  const groups = (await db.productOptionGroups.where('productId').equals(productId).toArray())
+    .filter(group => group.isDeleted === 0)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const groupIds = groups.map(group => group.id!).filter(Boolean);
+  const options = groupIds.length > 0
+    ? (await db.productOptions.where('groupId').anyOf(groupIds).toArray())
+      .filter(option => option.isDeleted === 0)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+    : [];
+  return { groups, options };
+}
+
+export function buildStockKey(productId: number, selectedOptionIds: number[] = []) {
+  return [productId, ...selectedOptionIds.slice().sort((a, b) => a - b)].join(':');
+}
+
+export async function getProductStockUsage(productId: number, selectedOptionIds: number[] = []) {
+  const usage: Record<number, number> = {};
+
+  const productRecipes = await db.productRecipes.where('productId').equals(productId).toArray();
+  productRecipes.forEach(recipe => {
+    usage[recipe.warehouseItemId] = (usage[recipe.warehouseItemId] || 0) + recipe.quantity;
+  });
+
+  if (selectedOptionIds.length > 0) {
+    const optionRecipes = await db.productOptionRecipes.where('optionId').anyOf(selectedOptionIds).toArray();
+    optionRecipes.forEach(recipe => {
+      usage[recipe.warehouseItemId] = (usage[recipe.warehouseItemId] || 0) + recipe.quantity;
+    });
+  }
+
+  return usage;
+}
+
+export async function getAvailableStockForSelection(productId: number, selectedOptionIds: number[] = []) {
+  const usage = await getProductStockUsage(productId, selectedOptionIds);
+  const usageEntries = Object.entries(usage);
+  if (usageEntries.length === 0) {
+    const product = await db.products.get(productId);
+    return product?.stock ?? 0;
+  }
+
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  let available = Infinity;
+  for (const [warehouseItemId, quantity] of usageEntries) {
+    if (quantity <= 0) continue;
+    const item = await db.warehouseItems.get(Number(warehouseItemId));
+    if (!item || item.isDeleted === 1) return 0;
+    const isResetToday = item.isDailyReset === 1 && item.lastPreparedDate !== todayStr;
+    const effectiveStock = isResetToday ? 0 : item.stock;
+    available = Math.min(available, Math.floor(effectiveStock / quantity));
+  }
+
+  return available === Infinity ? 0 : available;
 }
 
 export async function ensureProductWarehouseLink(product: Product) {
@@ -667,6 +808,36 @@ export async function adjustWarehouseStock(productId: number, qtyDelta: number) 
           updatedAt: new Date()
         });
       }
+    }
+  }
+}
+
+export async function adjustConfiguredStock(productId: number, qtyDelta: number, selectedOptionIds: number[] = []) {
+  if (productId < 0) {
+    await adjustWarehouseStock(productId, qtyDelta);
+    return;
+  }
+
+  const usage = await getProductStockUsage(productId, selectedOptionIds);
+  const usageEntries = Object.entries(usage);
+  if (usageEntries.length === 0) {
+    const freshProduct = await db.products.get(productId);
+    if (freshProduct) {
+      await db.products.update(productId, {
+        stock: Math.max(0, freshProduct.stock - qtyDelta),
+        updatedAt: new Date()
+      });
+    }
+    return;
+  }
+
+  for (const [warehouseItemId, quantity] of usageEntries) {
+    const item = await db.warehouseItems.get(Number(warehouseItemId));
+    if (item) {
+      await db.warehouseItems.update(Number(warehouseItemId), {
+        stock: Math.max(0, item.stock - (quantity * qtyDelta)),
+        updatedAt: new Date()
+      });
     }
   }
 }

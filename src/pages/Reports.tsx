@@ -49,6 +49,7 @@ export default function Laporan() {
 
   const warehouseItems = useLiveQuery(() => db.warehouseItems.where('isDeleted').equals(0).toArray());
   const productRecipes = useLiveQuery(() => db.productRecipes.toArray());
+  const productOptionRecipes = useLiveQuery(() => db.productOptionRecipes.toArray());
   const dailyPrepFormulas = useLiveQuery(() => db.dailyPrepFormulas.toArray());
 
   // Permission gate after all hooks have been called.
@@ -159,6 +160,14 @@ export default function Laporan() {
       } else {
         const recipes = productRecipes?.filter(r => r.productId === txItem.productId) ?? [];
         recipes.forEach(recipe => {
+          if (usedMap[recipe.warehouseItemId] !== undefined) {
+            usedMap[recipe.warehouseItemId] += txItem.quantity * recipe.quantity;
+          }
+        });
+
+        const selectedOptionIds = txItem.selectedOptions?.map(option => option.optionId) ?? [];
+        const optionRecipes = productOptionRecipes?.filter(recipe => selectedOptionIds.includes(recipe.optionId)) ?? [];
+        optionRecipes.forEach(recipe => {
           if (usedMap[recipe.warehouseItemId] !== undefined) {
             usedMap[recipe.warehouseItemId] += txItem.quantity * recipe.quantity;
           }

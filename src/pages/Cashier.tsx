@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Product, type Category, type Transaction, type TransactionItemRecord, adjustWarehouseStock, autoLinkChickenRecipes } from '@/lib/db';
+import { db, type Product, type Category, type Transaction, type TransactionItemRecord, type CartOptionSnapshot, adjustConfiguredStock, autoLinkChickenRecipes, buildStockKey, getAvailableStockForSelection } from '@/lib/db';
 import { useState, useRef, useEffect } from 'react';
 import { Search, Plus, Minus, ShoppingCart, X, Percent, Tag, CreditCard, Banknote, Check, Package as PackageIcon, ClipboardList, Save, Pencil, User, Hash, Trash2, Utensils, ShoppingBag } from 'lucide-react';
 import Receipt from '@/components/Receipt';
@@ -22,6 +22,9 @@ import LockedPage from '@/components/LockedPage';
 
 interface CartItem {
   product: Product;
+  stockKey: string;
+  baseName: string;
+  selectedOptions: CartOptionSnapshot[];
   qty: number;
   discountType: 'percentage' | 'nominal' | null;
   discountValue: number;
@@ -38,7 +41,7 @@ export default function Kasir() {
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [editingTxId, setEditingTxId] = useState<number | null>(null);
-  const [originalQuantities, setOriginalQuantities] = useState<Record<number, number>>({});
+  const [originalQuantities, setOriginalQuantities] = useState<Record<string, number>>({});
   const [originalTx, setOriginalTx] = useState<Transaction | null>(null);
   const [originalItems, setOriginalItems] = useState<TransactionItemRecord[]>([]);
   const [serviceType, setServiceType] = useState<'dine_in' | 'take_away'>('dine_in');
@@ -65,13 +68,15 @@ export default function Kasir() {
   const [remarks, setRemarks] = useState('');
 
   const [openBillsOpen, setOpenBillsOpen] = useState(false);
-  const [editingItemNotes, setEditingItemNotes] = useState<number | null>(null);
+  const [editingItemNotes, setEditingItemNotes] = useState<string | null>(null);
   const [tempItemNotes, setTempItemNotes] = useState('');
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelTargetTx, setCancelTargetTx] = useState<Transaction | null>(null);
 
   const [prepModalOpen, setPrepModalOpen] = useState(false);
   const [prepCount, setPrepCount] = useState('1');
+  const [optionProduct, setOptionProduct] = useState<Product | null>(null);
+  const [selectedOptionIds, setSelectedOptionIds] = useState<Record<number, number[]>>({});
 
   const products = useLiveQuery(() => db.products.where('isDeleted').equals(0).toArray());
   const categories = useLiveQuery(() => db.categories.where('isDeleted').equals(0).toArray());
@@ -83,10 +88,84 @@ export default function Kasir() {
   const openBills = useLiveQuery(() => db.transactions.where('status').equals('open').reverse().sortBy('date'));
   const allUsers = useLiveQuery(() => db.users.toArray());
   const productRecipes = useLiveQuery(() => db.productRecipes.toArray());
+  const productOptionGroups = useLiveQuery(() => db.productOptionGroups.toArray());
+  const productOptions = useLiveQuery(() => db.productOptions.toArray());
 
   // Permission gate — kept render-side (not redirect) so the bottom nav stays
   // intact. All hooks above run unconditionally; we just swap the rendered tree.
   const allowed = can('create_transaction');
+
+  const getProductGroups = (productId?: number) => (productOptionGroups ?? [])
+    .filter(group => group.productId === productId && group.isDeleted === 0)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  const getGroupOptions = (groupId?: number) => (productOptions ?? [])
+    .filter(option => option.groupId === groupId && option.isDeleted === 0)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  const getDefaultOptionSelection = (product: Product) => {
+    const selection: Record<number, number[]> = {};
+    getProductGroups(product.id).forEach(group => {
+      const options = getGroupOptions(group.id);
+      const defaults = options.filter(option => option.isDefault === 1).map(option => option.id!).filter(Boolean);
+      if (defaults.length > 0) {
+        selection[group.id!] = defaults.slice(0, group.maxSelect);
+      } else if (group.required === 1 && options[0]?.id) {
+        selection[group.id!] = [options[0].id];
+      } else {
+        selection[group.id!] = [];
+      }
+    });
+    return selection;
+  };
+
+  const getSelectionOptionIds = (selection: Record<number, number[]>) =>
+    Object.values(selection).flat().filter(Boolean);
+
+  const buildOptionSnapshots = (selection: Record<number, number[]>): CartOptionSnapshot[] => {
+    const snapshots: CartOptionSnapshot[] = [];
+    getSelectionOptionIds(selection).forEach(optionId => {
+      const option = productOptions?.find(o => o.id === optionId);
+      const group = option ? productOptionGroups?.find(g => g.id === option.groupId) : undefined;
+      if (!option || !group) return;
+      snapshots.push({
+        groupId: group.id!,
+        groupName: group.name,
+        optionId: option.id!,
+        optionName: option.name,
+        priceDelta: option.priceDelta || 0,
+        hppDelta: option.hppDelta || 0,
+      });
+    });
+    return snapshots;
+  };
+
+  const getConfiguredProduct = (product: Product, selectedOptions: CartOptionSnapshot[]) => {
+    const optionLabel = selectedOptions.map(option => option.optionName).join(' / ');
+    const priceDelta = selectedOptions.reduce((sum, option) => sum + option.priceDelta, 0);
+    const hppDelta = selectedOptions.reduce((sum, option) => sum + option.hppDelta, 0);
+    return {
+      ...product,
+      name: optionLabel ? `${product.name} - ${optionLabel}` : product.name,
+      price: product.price + priceDelta,
+      hpp: product.hpp + hppDelta,
+    };
+  };
+
+  const validateSelection = (product: Product, selection: Record<number, number[]>) => {
+    for (const group of getProductGroups(product.id)) {
+      const selected = selection[group.id!] ?? [];
+      if (group.required === 1 && selected.length < group.minSelect) {
+        toast.error(`Pilih ${group.name}`);
+        return false;
+      }
+      if (selected.length > group.maxSelect) {
+        toast.error(`${group.name} maksimal ${group.maxSelect} pilihan`);
+        return false;
+      }
+    }
+    return true;
+  };
 
   const loadTransactionForEditing = async (txId: number) => {
     try {
@@ -100,7 +179,7 @@ export default function Kasir() {
       const allProducts = await db.products.toArray(); // load all products
 
       const cartItems: CartItem[] = [];
-      const qtyMap: Record<number, number> = {};
+      const qtyMap: Record<string, number> = {};
 
       for (const item of items) {
         let product = allProducts.find(p => p.id === item.productId);
@@ -140,14 +219,26 @@ export default function Kasir() {
             deletedAt: new Date()
           };
         }
+        const selectedOptions = item.selectedOptions ?? [];
+        const selectedOptionIds = selectedOptions.map(option => option.optionId);
+        const stockKey = item.stockKey || buildStockKey(item.productId, selectedOptionIds);
+        const configuredProduct = {
+          ...product,
+          name: item.productName,
+          price: item.price,
+          hpp: item.hpp,
+        };
         cartItems.push({
-          product,
+          product: configuredProduct,
+          stockKey,
+          baseName: item.productBaseName || product.name,
+          selectedOptions,
           qty: item.quantity,
           discountType: item.discountType as 'percentage' | 'nominal' | null,
           discountValue: item.discountValue,
           notes: item.notes,
         });
-        qtyMap[item.productId] = item.quantity;
+        qtyMap[stockKey] = item.quantity;
       }
 
       setCart(cartItems);
@@ -284,7 +375,7 @@ export default function Kasir() {
     }
   };
 
-  const cartProductIds = new Set(cart.map(c => c.product.id));
+  const cartProductIds = new Set(cart.map(c => c.stockKey));
 
   const cashierVisibleItems = visibleWarehouseItems?.filter(item => item.isCashierVisible === 1) ?? [];
   const virtualProducts: Product[] = cashierVisibleItems.map(item => ({
@@ -335,9 +426,11 @@ export default function Kasir() {
   const filtered = allAvailableProducts.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase());
     const matchCategory = filterCategory === 'all' || p.categoryId === Number(filterCategory);
-    const origQty = originalQuantities[p.id!] || 0;
+    const baseStockKey = buildStockKey(p.id!);
+    const origQty = originalQuantities[baseStockKey] || 0;
     const allowedStock = p.stock + origQty;
-    return matchSearch && matchCategory && (allowedStock > 0 || cartProductIds.has(p.id!));
+    const hasConfigOptions = getProductGroups(p.id).length > 0;
+    return matchSearch && matchCategory && (hasConfigOptions || allowedStock > 0 || cartProductIds.has(baseStockKey));
   });
 
   const doFullReset = () => {
@@ -362,68 +455,108 @@ export default function Kasir() {
 
   // === Cart Operations ===
 
-  const addToCart = (product: Product) => {
+  const addConfiguredToCart = async (product: Product, selectedOptions: CartOptionSnapshot[] = []) => {
+    const selectedOptionIds = selectedOptions.map(option => option.optionId);
+    const stockKey = buildStockKey(product.id!, selectedOptionIds);
+    const availableStock = product.id! < 0
+      ? product.stock
+      : await getAvailableStockForSelection(product.id!, selectedOptionIds);
+    const configuredProduct = {
+      ...getConfiguredProduct(product, selectedOptions),
+      stock: availableStock,
+    };
+
     setCart(prev => {
-      const existing = prev.find(c => c.product.id === product.id);
-      const origQty = originalQuantities[product.id!] || 0;
-      const allowedStock = product.stock + origQty;
+      const existing = prev.find(c => c.stockKey === stockKey);
+      const origQty = originalQuantities[stockKey] || 0;
+      const allowedStock = availableStock + origQty;
       if (existing) {
         if (existing.qty >= allowedStock) {
           toast.error('Stok tidak cukup');
           return prev;
         }
-        return prev.map(c => c.product.id === product.id ? { ...c, qty: c.qty + 1 } : c);
+        return prev.map(c => c.stockKey === stockKey ? { ...c, qty: c.qty + 1 } : c);
       }
       if (allowedStock <= 0) {
         toast.error('Stok tidak cukup');
         return prev;
       }
-      return [...prev, { product, qty: 1, discountType: null, discountValue: 0 }];
+      return [...prev, {
+        product: configuredProduct,
+        stockKey,
+        baseName: product.name,
+        selectedOptions,
+        qty: 1,
+        discountType: null,
+        discountValue: 0
+      }];
     });
   };
 
-  const updateQty = (productId: number, delta: number) => {
+  const addToCart = (product: Product) => {
+    const groups = getProductGroups(product.id);
+    if (groups.length > 0) {
+      const selection = getDefaultOptionSelection(product);
+      setOptionProduct(product);
+      setSelectedOptionIds(selection);
+      return;
+    }
+    void addConfiguredToCart(product);
+  };
+
+  const confirmOptionProduct = () => {
+    if (!optionProduct) return;
+    if (!validateSelection(optionProduct, selectedOptionIds)) return;
+    const snapshots = buildOptionSnapshots(selectedOptionIds);
+    void addConfiguredToCart(optionProduct, snapshots);
+    setOptionProduct(null);
+    setSelectedOptionIds({});
+  };
+
+  const toggleOptionSelection = (groupId: number, optionId: number, maxSelect: number) => {
+    setSelectedOptionIds(prev => {
+      const current = prev[groupId] ?? [];
+      const exists = current.includes(optionId);
+      if (maxSelect <= 1) {
+        return { ...prev, [groupId]: exists ? [] : [optionId] };
+      }
+      if (exists) {
+        return { ...prev, [groupId]: current.filter(id => id !== optionId) };
+      }
+      if (current.length >= maxSelect) {
+        toast.error(`Maksimal ${maxSelect} pilihan`);
+        return prev;
+      }
+      return { ...prev, [groupId]: [...current, optionId] };
+    });
+  };
+
+  const updateQty = (stockKey: string, delta: number) => {
     setCart(prev => prev.map(c => {
-      if (c.product.id !== productId) return c;
+      if (c.stockKey !== stockKey) return c;
       const newQty = c.qty + delta;
       if (newQty <= 0) return c;
-      const origQty = originalQuantities[productId] || 0;
+      const origQty = originalQuantities[stockKey] || 0;
       const allowedStock = c.product.stock + origQty;
       if (newQty > allowedStock) { toast.error('Stok tidak cukup'); return c; }
       return { ...c, qty: newQty };
     }));
   };
 
-  const removeFromCart = (productId: number) => {
-    setCart(prev => prev.filter(c => c.product.id !== productId));
+  const removeFromCart = (stockKey: string) => {
+    setCart(prev => prev.filter(c => c.stockKey !== stockKey));
   };
 
-  const applyStockDelta = async (productId: number, qtyDelta: number) => {
-    if (productId < 0) {
-      await adjustWarehouseStock(productId, qtyDelta);
-      return;
-    }
-
-    const recipeCount = await db.productRecipes.where('productId').equals(productId).count();
-    if (recipeCount === 0) {
-      const freshProduct = await db.products.get(productId);
-      if (freshProduct) {
-        await db.products.update(productId, {
-          stock: freshProduct.stock - qtyDelta,
-          updatedAt: new Date()
-        });
-      }
-    }
-
-    await adjustWarehouseStock(productId, qtyDelta);
+  const applyStockDelta = async (productId: number, qtyDelta: number, selectedOptions: CartOptionSnapshot[] = []) => {
+    await adjustConfiguredStock(productId, qtyDelta, selectedOptions.map(option => option.optionId));
   };
 
-  const updateItemNotes = (productId: number, notes: string) => {
-    setCart(prev => prev.map(c => c.product.id === productId ? { ...c, notes: notes.trim() || undefined } : c));
+  const updateItemNotes = (stockKey: string, notes: string) => {
+    setCart(prev => prev.map(c => c.stockKey === stockKey ? { ...c, notes: notes.trim() || undefined } : c));
   };
 
   const openItemDiscount = (item: CartItem) => {
-    setItemDiscountTargetId(item.product.id!);
+    setItemDiscountTargetId(cart.findIndex(c => c.stockKey === item.stockKey));
     if (item.discountType) {
       setItemDiscountType(item.discountType);
       setItemDiscountValue(String(item.discountValue));
@@ -437,7 +570,7 @@ export default function Kasir() {
     if (itemDiscountTargetId == null) return;
     const raw = Number(itemDiscountValue) || 0;
     setCart(prev => prev.map(c => {
-      if (c.product.id !== itemDiscountTargetId) return c;
+      if (prev.findIndex(item => item.stockKey === c.stockKey) !== itemDiscountTargetId) return c;
       if (raw <= 0) {
         return { ...c, discountType: null, discountValue: 0 };
       }
@@ -452,8 +585,8 @@ export default function Kasir() {
 
   const clearItemDiscount = () => {
     if (itemDiscountTargetId == null) return;
-    setCart(prev => prev.map(c =>
-      c.product.id === itemDiscountTargetId
+    setCart(prev => prev.map((c, index) =>
+      index === itemDiscountTargetId
         ? { ...c, discountType: null, discountValue: 0 }
         : c
     ));
@@ -517,6 +650,9 @@ export default function Kasir() {
         transactionId: editingTxId,
         productId: c.product.id!,
         productName: c.product.name,
+        productBaseName: c.baseName,
+        selectedOptions: c.selectedOptions,
+        stockKey: c.stockKey,
         quantity: c.qty,
         price: c.product.price,
         hpp: c.product.hpp,
@@ -530,19 +666,20 @@ export default function Kasir() {
 
       // Adjust stock deltas safely by fetching fresh database stock
       for (const cartItem of cart) {
-        const oldItem = oldItems.find(oi => oi.productId === cartItem.product.id);
+        const oldItem = oldItems.find(oi => (oi.stockKey || buildStockKey(oi.productId, oi.selectedOptions?.map(option => option.optionId) ?? [])) === cartItem.stockKey);
         const oldQty = oldItem?.quantity ?? 0;
         const newQty = cartItem.qty;
         const delta = newQty - oldQty;
         if (delta !== 0) {
-          await applyStockDelta(cartItem.product.id!, delta);
+          await applyStockDelta(cartItem.product.id!, delta, cartItem.selectedOptions);
         }
       }
       // Restore stock for removed items that were in old bill
       for (const oldItem of oldItems) {
-        const stillInCart = cart.find(c => c.product.id === oldItem.productId);
+        const oldStockKey = oldItem.stockKey || buildStockKey(oldItem.productId, oldItem.selectedOptions?.map(option => option.optionId) ?? []);
+        const stillInCart = cart.find(c => c.stockKey === oldStockKey);
         if (!stillInCart) {
-          await applyStockDelta(oldItem.productId, -oldItem.quantity);
+          await applyStockDelta(oldItem.productId, -oldItem.quantity, oldItem.selectedOptions ?? []);
         }
       }
 
@@ -578,6 +715,9 @@ export default function Kasir() {
         transactionId: txId as number,
         productId: c.product.id!,
         productName: c.product.name,
+        productBaseName: c.baseName,
+        selectedOptions: c.selectedOptions,
+        stockKey: c.stockKey,
         quantity: c.qty,
         price: c.product.price,
         hpp: c.product.hpp,
@@ -590,7 +730,7 @@ export default function Kasir() {
       await db.transactionItems.bulkAdd(itemRecords);
 
       for (const item of cart) {
-        await applyStockDelta(item.product.id!, item.qty);
+        await applyStockDelta(item.product.id!, item.qty, item.selectedOptions);
       }
 
       toast.success(`Bill ${receiptNumber} disimpan!`);
@@ -607,6 +747,7 @@ export default function Kasir() {
       const allProducts = await db.products.toArray();
 
       const cartItems: CartItem[] = [];
+      const qtyMap: Record<string, number> = {};
 
       for (const item of items) {
         let product = allProducts.find(p => p.id === item.productId);
@@ -646,17 +787,32 @@ export default function Kasir() {
             deletedAt: new Date()
           };
         }
+        const selectedOptions = item.selectedOptions ?? [];
+        const stockKey = item.stockKey || buildStockKey(item.productId, selectedOptions.map(option => option.optionId));
+        const configuredProduct = {
+          ...product,
+          name: item.productName,
+          price: item.price,
+          hpp: item.hpp,
+        };
         cartItems.push({
-          product,
+          product: configuredProduct,
+          stockKey,
+          baseName: item.productBaseName || product.name,
+          selectedOptions,
           qty: item.quantity,
           discountType: item.discountType as 'percentage' | 'nominal' | null,
           discountValue: item.discountValue,
           notes: item.notes,
         });
+        qtyMap[stockKey] = item.quantity;
       }
 
       setCart(cartItems);
       setEditingTxId(tx.id);
+      setOriginalTx(tx);
+      setOriginalItems(items);
+      setOriginalQuantities(qtyMap);
       setTxDiscountType(tx.discountType);
       setTxDiscountValue(tx.discountType ? String(tx.discountValue) : '');
       setCustomerName(tx.customerName || '');
@@ -675,7 +831,7 @@ export default function Kasir() {
     if (!tx.id) return;
     const items = await db.transactionItems.where('transactionId').equals(tx.id).toArray();
     for (const item of items) {
-      await applyStockDelta(item.productId, -item.quantity);
+      await applyStockDelta(item.productId, -item.quantity, item.selectedOptions ?? []);
     }
     await db.transactionItems.where('transactionId').equals(tx.id).delete();
     await db.transactions.delete(tx.id);
@@ -733,6 +889,9 @@ export default function Kasir() {
         transactionId: editingTxId,
         productId: c.product.id!,
         productName: c.product.name,
+        productBaseName: c.baseName,
+        selectedOptions: c.selectedOptions,
+        stockKey: c.stockKey,
         quantity: c.qty,
         price: c.product.price,
         hpp: c.product.hpp,
@@ -746,18 +905,19 @@ export default function Kasir() {
 
       // Adjust stock deltas safely by fetching fresh database stock
       for (const cartItem of cart) {
-        const oldItem = oldItems.find(oi => oi.productId === cartItem.product.id);
+        const oldItem = oldItems.find(oi => (oi.stockKey || buildStockKey(oi.productId, oi.selectedOptions?.map(option => option.optionId) ?? [])) === cartItem.stockKey);
         const oldQty = oldItem?.quantity ?? 0;
         const newQty = cartItem.qty;
         const delta = newQty - oldQty;
         if (delta !== 0) {
-          await applyStockDelta(cartItem.product.id!, delta);
+          await applyStockDelta(cartItem.product.id!, delta, cartItem.selectedOptions);
         }
       }
       for (const oldItem of oldItems) {
-        const stillInCart = cart.find(c => c.product.id === oldItem.productId);
+        const oldStockKey = oldItem.stockKey || buildStockKey(oldItem.productId, oldItem.selectedOptions?.map(option => option.optionId) ?? []);
+        const stillInCart = cart.find(c => c.stockKey === oldStockKey);
         if (!stillInCart) {
-          await applyStockDelta(oldItem.productId, -oldItem.quantity);
+          await applyStockDelta(oldItem.productId, -oldItem.quantity, oldItem.selectedOptions ?? []);
         }
       }
 
@@ -795,6 +955,9 @@ export default function Kasir() {
         transactionId: txId as number,
         productId: c.product.id!,
         productName: c.product.name,
+        productBaseName: c.baseName,
+        selectedOptions: c.selectedOptions,
+        stockKey: c.stockKey,
         quantity: c.qty,
         price: c.product.price,
         hpp: c.product.hpp,
@@ -807,7 +970,7 @@ export default function Kasir() {
       await db.transactionItems.bulkAdd(itemRecords);
 
       for (const item of cart) {
-        await applyStockDelta(item.product.id!, item.qty);
+        await applyStockDelta(item.product.id!, item.qty, item.selectedOptions);
       }
 
       toast.success(`Transaksi berhasil! ${receiptNumber}`);
@@ -967,7 +1130,7 @@ export default function Kasir() {
           <div className="flex flex-col flex-1 overflow-hidden">
             <div className="flex-1 overflow-y-auto space-y-3 p-4">
               {cart.map(item => (
-                <div key={item.product.id} className="bg-muted/50 p-3 rounded-xl space-y-1.5">
+                <div key={item.stockKey} className="bg-muted/50 p-3 rounded-xl space-y-1.5">
                   <div className="flex items-center gap-3">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold truncate">{item.product.name}</p>
@@ -980,11 +1143,11 @@ export default function Kasir() {
                       <p className="text-sm font-bold text-primary">{rp(getItemSubtotal(item))}</p>
                     </div>
                     <div className="flex items-center gap-1">
-                      <Button variant="outline" size="icon" className="h-8 w-8 rounded-full" onClick={() => item.qty === 1 ? removeFromCart(item.product.id!) : updateQty(item.product.id!, -1)}>
+                      <Button variant="outline" size="icon" className="h-8 w-8 rounded-full" onClick={() => item.qty === 1 ? removeFromCart(item.stockKey) : updateQty(item.stockKey, -1)}>
                         {item.qty === 1 ? <X className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
                       </Button>
                       <span className="w-8 text-center text-sm font-bold">{item.qty}</span>
-                      <Button variant="outline" size="icon" className="h-8 w-8 rounded-full" onClick={() => updateQty(item.product.id!, 1)}>
+                      <Button variant="outline" size="icon" className="h-8 w-8 rounded-full" onClick={() => updateQty(item.stockKey, 1)}>
                         <Plus className="w-3 h-3" />
                       </Button>
                     </div>
@@ -993,7 +1156,7 @@ export default function Kasir() {
                     {item.notes ? (
                       <button
                         className="flex items-center gap-1 text-[10px] text-accent bg-accent/10 px-2 py-0.5 rounded-full"
-                        onClick={() => { setEditingItemNotes(item.product.id!); setTempItemNotes(item.notes || ''); }}
+                        onClick={() => { setEditingItemNotes(item.stockKey); setTempItemNotes(item.notes || ''); }}
                       >
                         <Pencil className="w-2.5 h-2.5" />
                         {item.notes}
@@ -1001,7 +1164,7 @@ export default function Kasir() {
                     ) : (
                       <button
                         className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
-                        onClick={() => { setEditingItemNotes(item.product.id!); setTempItemNotes(''); }}
+                        onClick={() => { setEditingItemNotes(item.stockKey); setTempItemNotes(''); }}
                       >
                         <Pencil className="w-2.5 h-2.5" />
                         Tambah catatan
@@ -1025,7 +1188,7 @@ export default function Kasir() {
                       </button>
                     )}
                   </div>
-                  {editingItemNotes === item.product.id && (
+                  {editingItemNotes === item.stockKey && (
                     <div className="flex gap-2 items-center">
                       <Input
                         autoFocus
@@ -1034,11 +1197,11 @@ export default function Kasir() {
                         placeholder="Contoh: less sugar..."
                         className="h-8 text-xs"
                         onKeyDown={e => {
-                          if (e.key === 'Enter') { updateItemNotes(item.product.id!, tempItemNotes); setEditingItemNotes(null); }
+                          if (e.key === 'Enter') { updateItemNotes(item.stockKey, tempItemNotes); setEditingItemNotes(null); }
                           if (e.key === 'Escape') setEditingItemNotes(null);
                         }}
                       />
-                      <Button size="sm" className="h-8 text-xs" onClick={() => { updateItemNotes(item.product.id!, tempItemNotes); setEditingItemNotes(null); }}>OK</Button>
+                      <Button size="sm" className="h-8 text-xs" onClick={() => { updateItemNotes(item.stockKey, tempItemNotes); setEditingItemNotes(null); }}>OK</Button>
                     </div>
                   )}
                 </div>
@@ -1198,7 +1361,7 @@ export default function Kasir() {
           <div className="flex flex-col h-full mt-4">
             <div className="flex-1 overflow-y-auto space-y-3 pb-4">
               {cart.map(item => (
-                <div key={item.product.id} className="bg-muted/50 p-3 rounded-xl space-y-1.5">
+                <div key={item.stockKey} className="bg-muted/50 p-3 rounded-xl space-y-1.5">
                   <div className="flex items-center gap-3">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold truncate">{item.product.name}</p>
@@ -1211,11 +1374,11 @@ export default function Kasir() {
                       <p className="text-sm font-bold text-primary">{rp(getItemSubtotal(item))}</p>
                     </div>
                     <div className="flex items-center gap-1">
-                      <Button variant="outline" size="icon" className="h-8 w-8 rounded-full" onClick={() => item.qty === 1 ? removeFromCart(item.product.id!) : updateQty(item.product.id!, -1)}>
+                      <Button variant="outline" size="icon" className="h-8 w-8 rounded-full" onClick={() => item.qty === 1 ? removeFromCart(item.stockKey) : updateQty(item.stockKey, -1)}>
                         {item.qty === 1 ? <X className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
                       </Button>
                       <span className="w-8 text-center text-sm font-bold">{item.qty}</span>
-                      <Button variant="outline" size="icon" className="h-8 w-8 rounded-full" onClick={() => updateQty(item.product.id!, 1)}>
+                      <Button variant="outline" size="icon" className="h-8 w-8 rounded-full" onClick={() => updateQty(item.stockKey, 1)}>
                         <Plus className="w-3 h-3" />
                       </Button>
                     </div>
@@ -1225,7 +1388,7 @@ export default function Kasir() {
                     {item.notes ? (
                       <button
                         className="flex items-center gap-1 text-[10px] text-accent bg-accent/10 px-2 py-0.5 rounded-full"
-                        onClick={() => { setEditingItemNotes(item.product.id!); setTempItemNotes(item.notes || ''); }}
+                        onClick={() => { setEditingItemNotes(item.stockKey); setTempItemNotes(item.notes || ''); }}
                       >
                         <Pencil className="w-2.5 h-2.5" />
                         {item.notes}
@@ -1233,7 +1396,7 @@ export default function Kasir() {
                     ) : (
                       <button
                         className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
-                        onClick={() => { setEditingItemNotes(item.product.id!); setTempItemNotes(''); }}
+                        onClick={() => { setEditingItemNotes(item.stockKey); setTempItemNotes(''); }}
                       >
                         <Pencil className="w-2.5 h-2.5" />
                         Tambah catatan
@@ -1258,7 +1421,7 @@ export default function Kasir() {
                     )}
                   </div>
                   {/* Inline notes editor */}
-                  {editingItemNotes === item.product.id && (
+                  {editingItemNotes === item.stockKey && (
                     <div className="flex gap-2 items-center">
                       <Input
                         autoFocus
@@ -1267,11 +1430,11 @@ export default function Kasir() {
                         placeholder="Contoh: less sugar..."
                         className="h-8 text-xs"
                         onKeyDown={e => {
-                          if (e.key === 'Enter') { updateItemNotes(item.product.id!, tempItemNotes); setEditingItemNotes(null); }
+                          if (e.key === 'Enter') { updateItemNotes(item.stockKey, tempItemNotes); setEditingItemNotes(null); }
                           if (e.key === 'Escape') setEditingItemNotes(null);
                         }}
                       />
-                      <Button size="sm" className="h-8 text-xs" onClick={() => { updateItemNotes(item.product.id!, tempItemNotes); setEditingItemNotes(null); }}>OK</Button>
+                      <Button size="sm" className="h-8 text-xs" onClick={() => { updateItemNotes(item.stockKey, tempItemNotes); setEditingItemNotes(null); }}>OK</Button>
                     </div>
                   )}
                 </div>
@@ -1464,6 +1627,74 @@ export default function Kasir() {
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Product Options Dialog */}
+      <Dialog open={!!optionProduct} onOpenChange={(open) => { if (!open) { setOptionProduct(null); setSelectedOptionIds({}); } }}>
+        <DialogContent className="max-w-[95vw] rounded-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Pilih Opsi</DialogTitle>
+          </DialogHeader>
+          {optionProduct && (
+            <div className="space-y-4 mt-2">
+              <div className="p-3 bg-muted/40 rounded-xl">
+                <p className="text-sm font-semibold">{optionProduct.name}</p>
+                <p className="text-xs text-muted-foreground">Harga dasar {rp(optionProduct.price)}</p>
+              </div>
+
+              {getProductGroups(optionProduct.id).map(group => {
+                const selected = selectedOptionIds[group.id!] ?? [];
+                return (
+                  <div key={group.id} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{group.name}</p>
+                      <Badge variant="outline" className="text-[10px]">
+                        {group.required ? 'Wajib' : 'Opsional'} {group.minSelect}-{group.maxSelect}
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {getGroupOptions(group.id).map(option => {
+                        const active = selected.includes(option.id!);
+                        return (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => toggleOptionSelection(group.id!, option.id!, group.maxSelect)}
+                            className={cn(
+                              'text-left p-3 rounded-xl border transition-colors min-h-[68px]',
+                              active ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-muted/30 text-foreground'
+                            )}
+                          >
+                            <span className="block text-sm font-semibold leading-tight">{option.name}</span>
+                            <span className="block text-xs text-muted-foreground mt-1">
+                              {option.priceDelta > 0 ? `+${rp(option.priceDelta)}` : option.priceDelta < 0 ? `-${rp(Math.abs(option.priceDelta))}` : 'Tanpa tambahan'}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {(() => {
+                const snapshots = buildOptionSnapshots(selectedOptionIds);
+                const previewProduct = getConfiguredProduct(optionProduct, snapshots);
+                return (
+                  <div className="flex items-center justify-between p-3 bg-primary/5 rounded-xl">
+                    <span className="text-sm font-medium">Harga</span>
+                    <span className="text-lg font-bold text-primary">{rp(previewProduct.price)}</span>
+                  </div>
+                );
+              })()}
+
+              <Button className="w-full h-12 font-semibold" onClick={confirmOptionProduct}>
+                <Plus className="w-5 h-5 mr-2" />
+                Tambah ke Keranjang
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Checkout Dialog */}
       <Dialog open={checkoutOpen} onOpenChange={setCheckoutOpen}>
@@ -1694,7 +1925,7 @@ export default function Kasir() {
             <DialogTitle>Diskon Item</DialogTitle>
           </DialogHeader>
           {(() => {
-            const target = cart.find(c => c.product.id === itemDiscountTargetId);
+            const target = itemDiscountTargetId == null ? undefined : cart[itemDiscountTargetId];
             if (!target) return null;
             const base = target.product.price * target.qty;
             const rawValue = Number(itemDiscountValue) || 0;

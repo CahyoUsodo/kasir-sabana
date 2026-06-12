@@ -12,7 +12,7 @@ export async function performBackup(): Promise<boolean> {
 
   // Collect all data
   const allData = {
-    version: 5,
+    version: 6,
     exportedAt: new Date().toISOString(),
     categories: await db.categories.toArray(),
     products: await db.products.toArray(),
@@ -28,6 +28,9 @@ export async function performBackup(): Promise<boolean> {
     units: await db.units.toArray(),
     warehouseItems: await db.warehouseItems.toArray(),
     productRecipes: await db.productRecipes.toArray(),
+    productOptionGroups: await db.productOptionGroups.toArray(),
+    productOptions: await db.productOptions.toArray(),
+    productOptionRecipes: await db.productOptionRecipes.toArray(),
     dailyPrepFormulas: await db.dailyPrepFormulas.toArray(),
   };
 
