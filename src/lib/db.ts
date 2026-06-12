@@ -537,10 +537,114 @@ class PosDatabase extends Dexie {
       productRecipes:   '++id, productId, warehouseItemId',
       dailyPrepFormulas: '++id, prepItemId, targetItemId',
     });
+
+    // Version 11 - indexes for recipe/formula upserts
+    this.version(11).stores({
+      categories:       '++id, name, isDeleted',
+      products:         '++id, name, &sku, categoryId, barcode, isDeleted, createdBy, updatedBy',
+      suppliers:        '++id, name, isDeleted',
+      stockIns:         '++id, productId, supplierId, date, createdBy',
+      stockOuts:        '++id, productId, date, createdBy',
+      hppHistory:       '++id, productId, date',
+      paymentMethods:   '++id, name, category',
+      transactions:     '++id, date, &receiptNumber, paymentMethodId, status, orderNumber, createdBy',
+      transactionItems: '++id, transactionId, productId',
+      storeSettings:    '++id',
+      units:            '++id, &name, isDeleted',
+      users:            '++id, &username, role, isActive',
+      warehouseItems:   '++id, name, isDeleted, isCashierVisible, isDailyReset',
+      productRecipes:   '++id, productId, warehouseItemId, [productId+warehouseItemId]',
+      dailyPrepFormulas: '++id, prepItemId, targetItemId, [prepItemId+targetItemId]',
+    }).upgrade(async (tx) => {
+      const recipeTable = tx.table('productRecipes');
+      const recipes = await recipeTable.toArray();
+      const seenRecipes = new Set<string>();
+      for (const recipe of recipes) {
+        const key = `${recipe.productId}:${recipe.warehouseItemId}`;
+        if (seenRecipes.has(key)) {
+          await recipeTable.delete(recipe.id);
+        } else {
+          seenRecipes.add(key);
+        }
+      }
+
+      const formulaTable = tx.table('dailyPrepFormulas');
+      const formulas = await formulaTable.toArray();
+      const seenFormulas = new Set<string>();
+      for (const formula of formulas) {
+        const key = `${formula.prepItemId}:${formula.targetItemId}`;
+        if (seenFormulas.has(key)) {
+          await formulaTable.delete(formula.id);
+        } else {
+          seenFormulas.add(key);
+        }
+      }
+    });
   }
 }
 
 export const db = new PosDatabase();
+
+export async function upsertProductRecipe(productId: number, warehouseItemId: number, quantity: number) {
+  const existing = await db.productRecipes
+    .where('[productId+warehouseItemId]')
+    .equals([productId, warehouseItemId])
+    .first();
+
+  if (existing?.id) {
+    await db.productRecipes.update(existing.id, { quantity });
+    return existing.id;
+  }
+
+  return db.productRecipes.add({ productId, warehouseItemId, quantity });
+}
+
+export async function ensureProductWarehouseLink(product: Product) {
+  const existingRecipes = await db.productRecipes.where('productId').equals(product.id!).toArray();
+  const activeWarehouseItems = await db.warehouseItems.where('isDeleted').equals(0).toArray();
+  const linkedWarehouseItem = existingRecipes
+    .map(recipe => activeWarehouseItems.find(item => item.id === recipe.warehouseItemId))
+    .find(Boolean);
+
+  if (linkedWarehouseItem) return linkedWarehouseItem;
+
+  const now = new Date();
+  const matchingWarehouseItem = activeWarehouseItems.find(
+    item => item.name.trim().toLowerCase() === product.name.trim().toLowerCase()
+  );
+
+  const warehouseItemId = matchingWarehouseItem?.id ?? await db.warehouseItems.add({
+    name: product.name.trim(),
+    stock: product.stock || 0,
+    unit: product.unit || 'pcs',
+    isCashierVisible: 0,
+    price: 0,
+    isDailyReset: 0,
+    lastPreparedDate: '',
+    dailyPrepQty: 0,
+    dailyPrepFactor: 1,
+    isDeleted: 0,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await upsertProductRecipe(product.id!, warehouseItemId, 1);
+  return db.warehouseItems.get(warehouseItemId);
+}
+
+export async function upsertDailyPrepFormula(prepItemId: number, targetItemId: number, factor: number) {
+  const existing = await db.dailyPrepFormulas
+    .where('[prepItemId+targetItemId]')
+    .equals([prepItemId, targetItemId])
+    .first();
+
+  if (existing?.id) {
+    await db.dailyPrepFormulas.update(existing.id, { factor });
+    return existing.id;
+  }
+
+  return db.dailyPrepFormulas.add({ prepItemId, targetItemId, factor });
+}
 
 // Helper to adjust warehouse stock during checkout or cancels
 export async function adjustWarehouseStock(productId: number, qtyDelta: number) {

@@ -1,9 +1,15 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type WarehouseItem, type Product } from '@/lib/db';
-import { useState, useEffect, useRef } from 'react';
+import { 
+  db, 
+  ensureProductWarehouseLink, 
+  upsertDailyPrepFormula, 
+  upsertProductRecipe, 
+  type WarehouseItem 
+} from '@/lib/db';
+import { useState, useRef } from 'react';
 import { 
   Warehouse, Plus, Trash2, Edit2, ChevronLeft, ArrowRight,
-  TrendingDown, Check, Scale, X, Layers, AlertCircle, ShoppingBag,
+  Scale, X, Layers, AlertCircle, ShoppingBag,
   Camera, Minus
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -13,7 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { 
   Select, 
   SelectContent, 
@@ -36,11 +42,6 @@ export default function WarehousePage() {
 
   const recipes = useLiveQuery(() => 
     db.productRecipes.toArray()
-  );
-
-  // Daily Reset check (can be chicken or custom opening preps)
-  const chickenItems = useLiveQuery(() => 
-    db.warehouseItems.where('isDailyReset').equals(1).toArray()
   );
 
   // States
@@ -159,8 +160,9 @@ export default function WarehousePage() {
     if (!confirm('Apakah Anda yakin ingin menghapus barang ini dari gudang? Resep yang terhubung dengannya akan tetap ada namun tidak berfungsi.')) return;
     try {
       await db.warehouseItems.update(id, { isDeleted: 1, updatedAt: new Date() });
-      // Clean up recipes with this item
       await db.productRecipes.where('warehouseItemId').equals(id).delete();
+      await db.dailyPrepFormulas.where('prepItemId').equals(id).delete();
+      await db.dailyPrepFormulas.where('targetItemId').equals(id).delete();
       toast.success('Barang gudang berhasil dihapus');
     } catch (err) {
       console.error(err);
@@ -185,52 +187,18 @@ export default function WarehousePage() {
     const qty = parseFloat(recipeQty) || 1;
     
     try {
-      // Check if link already exists
-      const existing = await db.productRecipes
-        .where('[productId+warehouseItemId]')
-        .equals([parseInt(selectedProductId), parseInt(selectedWarehouseItemId)])
-        .first();
-
-      if (existing) {
-        await db.productRecipes.update(existing.id!, { quantity: qty });
-        toast.success('Jumlah bahan resep diperbarui');
-      } else {
-        await db.productRecipes.add({
-          productId: parseInt(selectedProductId),
-          warehouseItemId: parseInt(selectedWarehouseItemId),
-          quantity: qty
-        });
-        toast.success('Bahan resep berhasil dihubungkan ke produk');
-      }
+      await upsertProductRecipe(
+        parseInt(selectedProductId),
+        parseInt(selectedWarehouseItemId),
+        qty
+      );
+      toast.success('Bahan resep berhasil dihubungkan ke produk');
       setRecipeDialog(false);
       setSelectedWarehouseItemId('');
       setRecipeQty('1');
     } catch (err) {
-      // Fallback if composite index isn't fully ready in v8
-      try {
-        const all = await db.productRecipes
-          .where('productId')
-          .equals(parseInt(selectedProductId))
-          .toArray();
-        const dup = all.find(r => r.warehouseItemId === parseInt(selectedWarehouseItemId));
-        if (dup) {
-          await db.productRecipes.update(dup.id!, { quantity: qty });
-          toast.success('Jumlah bahan resep diperbarui');
-        } else {
-          await db.productRecipes.add({
-            productId: parseInt(selectedProductId),
-            warehouseItemId: parseInt(selectedWarehouseItemId),
-            quantity: qty
-          });
-          toast.success('Bahan resep berhasil dihubungkan ke produk');
-        }
-        setRecipeDialog(false);
-        setSelectedWarehouseItemId('');
-        setRecipeQty('1');
-      } catch (nestedErr) {
-        console.error(nestedErr);
-        toast.error('Gagal menghubungkan resep');
-      }
+      console.error(err);
+      toast.error('Gagal menghubungkan resep');
     }
   };
 
@@ -247,28 +215,60 @@ export default function WarehousePage() {
   // Formula Edit states
   const [formulaDialog, setFormulaDialog] = useState(false);
   const [formulaPrepItem, setFormulaPrepItem] = useState<WarehouseItem | null>(null);
-  const [newFormulaTargetId, setNewFormulaTargetId] = useState<string>('');
+  const [newFormulaProductId, setNewFormulaProductId] = useState<string>('');
   const [newFormulaFactor, setNewFormulaFactor] = useState('1');
 
   // Load all prep formulas
   const formulas = useLiveQuery(() => db.dailyPrepFormulas.toArray());
 
-  // Add item to formula
+  const getProductForWarehouseItem = (warehouseItemId: number) => {
+    const recipe = recipes?.find(r => r.warehouseItemId === warehouseItemId && r.quantity === 1);
+    return recipe ? cashierProducts?.find(product => product.id === recipe.productId) : undefined;
+  };
+
+  const openFormulaDialog = (item: WarehouseItem) => {
+    setFormulaPrepItem(item);
+    setNewFormulaProductId('');
+    setNewFormulaFactor('1');
+    setFormulaDialog(true);
+  };
+
+  const openPrepDialog = (item: WarehouseItem) => {
+    const currentPrep = item.lastPreparedDate === todayStr ? (item.dailyPrepQty || 0) : 0;
+    setPrepItemId(item.id!);
+    setPrepCount(currentPrep.toString());
+    setPrepDialog(true);
+  };
+
+  // Add output product to formula. The formula still targets warehouse stock,
+  // because recipes consume warehouse items during checkout.
   const addFormulaItem = async () => {
-    if (!formulaPrepItem || !newFormulaTargetId) return;
+    if (!formulaPrepItem || !newFormulaProductId) return;
     const factor = parseFloat(newFormulaFactor) || 1;
     try {
-      await db.dailyPrepFormulas.add({
-        prepItemId: formulaPrepItem.id!,
-        targetItemId: parseInt(newFormulaTargetId),
-        factor: factor
-      });
-      setNewFormulaTargetId('');
+      const product = cashierProducts?.find(p => p.id === parseInt(newFormulaProductId));
+      if (!product) {
+        toast.error('Produk tidak ditemukan');
+        return;
+      }
+
+      const targetItem = await ensureProductWarehouseLink(product);
+      if (!targetItem?.id) {
+        toast.error('Gagal menyiapkan stok gudang untuk produk ini');
+        return;
+      }
+      if (targetItem.id === formulaPrepItem.id) {
+        toast.error('Produk output tidak boleh sama dengan item persiapan');
+        return;
+      }
+
+      await upsertDailyPrepFormula(formulaPrepItem.id!, targetItem.id, factor);
+      setNewFormulaProductId('');
       setNewFormulaFactor('1');
-      toast.success('Bahan berhasil ditambahkan ke rumus');
+      toast.success('Produk output berhasil ditambahkan ke rumus');
     } catch (err) {
       console.error(err);
-      toast.error('Gagal menambahkan bahan ke rumus');
+      toast.error('Gagal menambahkan produk ke rumus');
     }
   };
 
@@ -310,7 +310,7 @@ export default function WarehousePage() {
 
     try {
       // Find formula targets
-      const itemFormulas = formulas?.filter(f => f.prepItemId === prepItemId) || [];
+      const itemFormulas = activeFormulas.filter(f => f.prepItemId === prepItemId);
 
       if (itemFormulas.length > 0) {
         // 1. Update prepItem dailyPrepQty and decrement its stock by delta
@@ -393,9 +393,13 @@ export default function WarehousePage() {
   };
 
   const todayStr = new Date().toLocaleDateString('en-CA');
+  const activeFormulas = formulas?.filter(f => 
+    warehouseItems?.some(item => item.id === f.prepItemId) &&
+    warehouseItems?.some(item => item.id === f.targetItemId)
+  ) || [];
   
   // Calculate target item IDs from formulas to filter main list
-  const targetItemIds = new Set(formulas?.map(f => f.targetItemId) || []);
+  const targetItemIds = new Set(activeFormulas.map(f => f.targetItemId));
 
   // Main prep items are those marked with isDailyReset === 1 and NOT a target of any formula
   const mainPrepItems = warehouseItems?.filter(item => 
@@ -434,8 +438,8 @@ export default function WarehousePage() {
                 Beberapa stok persiapan harian belum dimasukkan untuk hari ini. Pastikan untuk melakukan persiapan opening toko.
               </p>
               <div className="flex gap-2 mt-2">
-                <Button size="sm" className="text-xs bg-warning text-warning-foreground hover:bg-warning/95" onClick={() => { setPrepItemId(null); setPrepCount('1'); setPrepDialog(true); }}>
-                  Persiapan Ayam Potong 9
+                <Button size="sm" className="text-xs bg-warning text-warning-foreground hover:bg-warning/95" onClick={() => mainPrepItems[0] && openPrepDialog(mainPrepItems[0])}>
+                  Mulai Persiapan Harian
                 </Button>
               </div>
             </div>
@@ -484,11 +488,11 @@ export default function WarehousePage() {
                       <div className="flex items-center gap-1 text-xs text-muted-foreground">
                         <span>Stok:</span>
                         <span className="font-bold text-foreground">{item.stock} {item.unit}</span>
-                        {item.isCashierVisible === 1 && item.price && (
+                        {item.isCashierVisible === 1 && (
                           <>
                             <span className="mx-1">•</span>
                             <span>Harga:</span>
-                            <span className="font-semibold text-foreground">Rp {item.price.toLocaleString('id-ID')}</span>
+                            <span className="font-semibold text-foreground">Rp {(item.price ?? 0).toLocaleString('id-ID')}</span>
                           </>
                         )}
                       </div>
@@ -590,7 +594,7 @@ export default function WarehousePage() {
           <div className="space-y-4">
             {mainPrepItems.map(item => {
               const prepQty = item.lastPreparedDate === todayStr ? (item.dailyPrepQty || 0) : 0;
-              const itemFormulas = formulas?.filter(f => f.prepItemId === item.id) || [];
+              const itemFormulas = activeFormulas.filter(f => f.prepItemId === item.id);
 
               return (
                 <Card key={item.id} className="border-0 shadow-sm overflow-hidden">
@@ -616,10 +620,7 @@ export default function WarehousePage() {
                           variant="outline" 
                           size="sm" 
                           className="h-8 text-xs font-semibold gap-1"
-                          onClick={() => {
-                            setFormulaPrepItem(item);
-                            setFormulaDialog(true);
-                          }}
+                          onClick={() => openFormulaDialog(item)}
                         >
                           <Edit2 className="w-3 h-3" /> Edit Rumus
                         </Button>
@@ -671,9 +672,10 @@ export default function WarehousePage() {
                         <div className="grid grid-cols-2 gap-2">
                           {itemFormulas.map(f => {
                             const targetItem = warehouseItems?.find(wi => wi.id === f.targetItemId);
+                            const product = getProductForWarehouseItem(f.targetItemId);
                             return (
                               <div key={f.id} className="p-2.5 bg-muted/20 border rounded-lg flex flex-col justify-between">
-                                <span className="text-[11px] font-semibold text-muted-foreground truncate">{targetItem?.name || `Bahan #${f.targetItemId}`}</span>
+                                <span className="text-[11px] font-semibold text-muted-foreground truncate">{product?.name || targetItem?.name || `Bahan #${f.targetItemId}`}</span>
                                 <div className="flex justify-between items-baseline mt-1">
                                   <span className="text-xs font-bold">{targetItem?.stock || 0} {targetItem?.unit || 'pcs'}</span>
                                   <Badge className="text-[9px] bg-primary/10 text-primary hover:bg-primary/20 border-0">
@@ -878,14 +880,15 @@ export default function WarehousePage() {
             <div className="text-xs text-muted-foreground p-3 bg-muted rounded-xl space-y-1">
               <span className="font-semibold text-foreground">Hasil Persiapan:</span>
               {(() => {
-                const itemFormulas = formulas?.filter(f => f.prepItemId === prepItemId) || [];
+                const itemFormulas = activeFormulas.filter(f => f.prepItemId === prepItemId);
                 if (itemFormulas.length > 0) {
                   return (
                     <div className="grid grid-cols-2 gap-1 mt-1 text-[11px]">
                       {itemFormulas.map(f => {
                         const targetItem = warehouseItems?.find(wi => wi.id === f.targetItemId);
+                        const product = getProductForWarehouseItem(f.targetItemId);
                         return (
-                          <div key={f.id}>{targetItem?.name || `Bahan #${f.targetItemId}`}: {(parseInt(prepCount) || 0) * f.factor} {targetItem?.unit || 'pcs'}</div>
+                          <div key={f.id}>{product?.name || targetItem?.name || `Bahan #${f.targetItemId}`}: {(parseInt(prepCount) || 0) * f.factor} {targetItem?.unit || 'pcs'}</div>
                         );
                       })}
                     </div>
@@ -914,19 +917,20 @@ export default function WarehousePage() {
               Edit Rumus: {formulaPrepItem?.name}
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Tentukan barang apa saja yang bertambah stoknya ketika {formulaPrepItem?.name} dipersiapkan beserta faktor pengalinya.
+              Pilih produk yang stok siap jualnya bertambah ketika {formulaPrepItem?.name} dipersiapkan.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 mt-2 max-h-[60vh] overflow-y-auto pr-1">
             {/* List of current targets in the formula */}
             <div className="space-y-2">
-              <Label className="text-xs font-semibold">Bahan Output Saat Ini</Label>
+              <Label className="text-xs font-semibold">Produk Output Saat Ini</Label>
               <div className="space-y-2">
-                {formulas?.filter(f => f.prepItemId === formulaPrepItem?.id).map(f => {
+                {activeFormulas.filter(f => f.prepItemId === formulaPrepItem?.id).map(f => {
                   const targetItem = warehouseItems?.find(wi => wi.id === f.targetItemId);
+                  const product = getProductForWarehouseItem(f.targetItemId);
                   return (
                     <div key={f.id} className="flex items-center justify-between gap-3 p-2 bg-muted/40 rounded-lg border text-xs">
-                      <span className="font-semibold truncate flex-1">{targetItem?.name || `Bahan #${f.targetItemId}`}</span>
+                      <span className="font-semibold truncate flex-1">{product?.name || targetItem?.name || `Bahan #${f.targetItemId}`}</span>
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-[10px] text-muted-foreground">Faktor:</span>
                         <Input 
@@ -948,9 +952,9 @@ export default function WarehousePage() {
                     </div>
                   );
                 })}
-                {formulas?.filter(f => f.prepItemId === formulaPrepItem?.id).length === 0 && (
+                {activeFormulas.filter(f => f.prepItemId === formulaPrepItem?.id).length === 0 && (
                   <p className="text-xs text-muted-foreground italic text-center py-2">
-                    Belum ada rumus bahan output. Stok persiapan akan ditambahkan ke diri sendiri.
+                    Belum ada produk output. Stok persiapan akan ditambahkan ke item ini sendiri.
                   </p>
                 )}
               </div>
@@ -958,20 +962,20 @@ export default function WarehousePage() {
 
             {/* Add new target form */}
             <div className="border-t pt-3 space-y-3">
-              <Label className="text-xs font-semibold">Tambah Bahan Output</Label>
+              <Label className="text-xs font-semibold">Tambah Produk Output</Label>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <span className="text-[10px] text-muted-foreground">Pilih Barang Gudang</span>
-                  <Select value={newFormulaTargetId} onValueChange={setNewFormulaTargetId}>
+                  <span className="text-[10px] text-muted-foreground">Pilih Produk Dijual</span>
+                  <Select value={newFormulaProductId} onValueChange={setNewFormulaProductId}>
                     <SelectTrigger className="h-10 text-xs">
-                      <SelectValue placeholder="Pilih Bahan" />
+                      <SelectValue placeholder="Pilih Produk" />
                     </SelectTrigger>
                     <SelectContent>
-                      {warehouseItems
-                        ?.filter(wi => wi.id !== formulaPrepItem?.id)
-                        .map(item => (
-                          <SelectItem key={item.id} value={item.id!.toString()} className="text-xs">
-                            {item.name} ({item.unit})
+                      {cashierProducts
+                        ?.filter(product => product.isDeleted === 0)
+                        .map(product => (
+                          <SelectItem key={product.id} value={product.id!.toString()} className="text-xs">
+                            {product.name} ({product.sku})
                           </SelectItem>
                         ))}
                     </SelectContent>
@@ -990,7 +994,7 @@ export default function WarehousePage() {
               </div>
               <Button 
                 onClick={addFormulaItem} 
-                disabled={!newFormulaTargetId} 
+                disabled={!newFormulaProductId} 
                 className="w-full h-10 text-xs font-semibold gap-1.5"
               >
                 <Plus className="w-4 h-4" /> Tambah ke Rumus

@@ -316,7 +316,7 @@ export default function Pengaturan() {
           }
 
           const responseRes = await response.json();
-          let data = reviveDates(responseRes.backupData);
+          const data = reviveDates(responseRes.backupData);
 
           if (!data || !data.version) {
             throw new Error('Data dari Google Drive tidak valid');
@@ -342,6 +342,9 @@ export default function Pengaturan() {
             storeSettings: await db.storeSettings.toArray(),
             users: await db.users.toArray(),
             units: await db.units.toArray(),
+            warehouseItems: await db.warehouseItems.toArray(),
+            productRecipes: await db.productRecipes.toArray(),
+            dailyPrepFormulas: await db.dailyPrepFormulas.toArray(),
           };
 
           try {
@@ -352,6 +355,9 @@ export default function Pengaturan() {
             await db.storeSettings.clear();
             if (Array.isArray(data.users)) { await db.users.clear(); }
             await db.units.clear();
+            await db.warehouseItems.clear();
+            await db.productRecipes.clear();
+            await db.dailyPrepFormulas.clear();
 
             // BulkAdd from downloaded data
             if (data.categories?.length) await db.categories.bulkAdd(data.categories);
@@ -364,6 +370,9 @@ export default function Pengaturan() {
             if (data.transactions?.length) await db.transactions.bulkAdd(data.transactions);
             if (data.storeSettings?.length) await db.storeSettings.bulkAdd(data.storeSettings);
             if (data.users?.length) await db.users.bulkAdd(data.users);
+            if (data.warehouseItems?.length) await db.warehouseItems.bulkAdd(data.warehouseItems);
+            if (data.productRecipes?.length) await db.productRecipes.bulkAdd(data.productRecipes);
+            if (data.dailyPrepFormulas?.length) await db.dailyPrepFormulas.bulkAdd(data.dailyPrepFormulas);
 
             if (Array.isArray(data.units) && data.units.length > 0) {
               await db.units.bulkAdd(data.units);
@@ -407,6 +416,7 @@ export default function Pengaturan() {
               await db.stockIns.clear(); await db.stockOuts.clear(); await db.hppHistory.clear();
               await db.paymentMethods.clear(); await db.transactions.clear(); await db.transactionItems.clear();
               await db.storeSettings.clear(); await db.users.clear(); await db.units.clear();
+              await db.warehouseItems.clear(); await db.productRecipes.clear(); await db.dailyPrepFormulas.clear();
 
               if (snapshot.categories.length) await db.categories.bulkAdd(snapshot.categories);
               if (snapshot.products.length) await db.products.bulkAdd(snapshot.products);
@@ -420,6 +430,9 @@ export default function Pengaturan() {
               if (snapshot.storeSettings.length) await db.storeSettings.bulkAdd(snapshot.storeSettings);
               if (snapshot.users.length) await db.users.bulkAdd(snapshot.users);
               if (snapshot.units.length) await db.units.bulkAdd(snapshot.units);
+              if (snapshot.warehouseItems.length) await db.warehouseItems.bulkAdd(snapshot.warehouseItems);
+              if (snapshot.productRecipes.length) await db.productRecipes.bulkAdd(snapshot.productRecipes);
+              if (snapshot.dailyPrepFormulas.length) await db.dailyPrepFormulas.bulkAdd(snapshot.dailyPrepFormulas);
               toast.error('Import gagal, data dikembalikan');
             } catch {
               toast.error('Import gagal dan rollback gagal.');
@@ -670,6 +683,9 @@ export default function Pengaturan() {
               storeSettings: await db.storeSettings.toArray(),
               users: await db.users.toArray(),
               units: await db.units.toArray(),
+              warehouseItems: await db.warehouseItems.toArray(),
+              productRecipes: await db.productRecipes.toArray(),
+              dailyPrepFormulas: await db.dailyPrepFormulas.toArray(),
             };
 
             setIsRestoring(true);
@@ -683,6 +699,9 @@ export default function Pengaturan() {
                 await db.users.clear();
               }
               await db.units.clear();
+              await db.warehouseItems.clear();
+              await db.productRecipes.clear();
+              await db.dailyPrepFormulas.clear();
 
               // BulkAdd from file
               if (data.categories?.length) await db.categories.bulkAdd(data.categories);
@@ -695,6 +714,9 @@ export default function Pengaturan() {
               if (data.transactions?.length) await db.transactions.bulkAdd(data.transactions);
               if (data.storeSettings?.length) await db.storeSettings.bulkAdd(data.storeSettings);
               if (data.users?.length) await db.users.bulkAdd(data.users);
+              if (data.warehouseItems?.length) await db.warehouseItems.bulkAdd(data.warehouseItems);
+              if (data.productRecipes?.length) await db.productRecipes.bulkAdd(data.productRecipes);
+              if (data.dailyPrepFormulas?.length) await db.dailyPrepFormulas.bulkAdd(data.dailyPrepFormulas);
 
               // Units (v3+ backup) or harvest from products (v1/v2 backup)
               if (Array.isArray(data.units) && data.units.length > 0) {
@@ -753,6 +775,9 @@ export default function Pengaturan() {
                 await db.storeSettings.clear();
                 await db.users.clear();
                 await db.units.clear();
+                await db.warehouseItems.clear();
+                await db.productRecipes.clear();
+                await db.dailyPrepFormulas.clear();
 
                 if (snapshot.categories.length) await db.categories.bulkAdd(snapshot.categories);
                 if (snapshot.products.length) await db.products.bulkAdd(snapshot.products);
@@ -766,6 +791,9 @@ export default function Pengaturan() {
                 if (snapshot.storeSettings.length) await db.storeSettings.bulkAdd(snapshot.storeSettings);
                 if (snapshot.users.length) await db.users.bulkAdd(snapshot.users);
                 if (snapshot.units.length) await db.units.bulkAdd(snapshot.units);
+                if (snapshot.warehouseItems.length) await db.warehouseItems.bulkAdd(snapshot.warehouseItems);
+                if (snapshot.productRecipes.length) await db.productRecipes.bulkAdd(snapshot.productRecipes);
+                if (snapshot.dailyPrepFormulas.length) await db.dailyPrepFormulas.bulkAdd(snapshot.dailyPrepFormulas);
 
                 toast.error('Import gagal, data dikembalikan');
               } catch {

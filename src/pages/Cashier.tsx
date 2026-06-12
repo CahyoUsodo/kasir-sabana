@@ -398,6 +398,26 @@ export default function Kasir() {
     setCart(prev => prev.filter(c => c.product.id !== productId));
   };
 
+  const applyStockDelta = async (productId: number, qtyDelta: number) => {
+    if (productId < 0) {
+      await adjustWarehouseStock(productId, qtyDelta);
+      return;
+    }
+
+    const recipeCount = await db.productRecipes.where('productId').equals(productId).count();
+    if (recipeCount === 0) {
+      const freshProduct = await db.products.get(productId);
+      if (freshProduct) {
+        await db.products.update(productId, {
+          stock: freshProduct.stock - qtyDelta,
+          updatedAt: new Date()
+        });
+      }
+    }
+
+    await adjustWarehouseStock(productId, qtyDelta);
+  };
+
   const updateItemNotes = (productId: number, notes: string) => {
     setCart(prev => prev.map(c => c.product.id === productId ? { ...c, notes: notes.trim() || undefined } : c));
   };
@@ -515,30 +535,14 @@ export default function Kasir() {
         const newQty = cartItem.qty;
         const delta = newQty - oldQty;
         if (delta !== 0) {
-          if (cartItem.product.id! < 0) {
-            await adjustWarehouseStock(cartItem.product.id!, delta);
-          } else {
-            const freshProduct = await db.products.get(cartItem.product.id!);
-            if (freshProduct) {
-              await db.products.update(cartItem.product.id!, { stock: freshProduct.stock - delta, updatedAt: new Date() });
-            }
-            await adjustWarehouseStock(cartItem.product.id!, delta);
-          }
+          await applyStockDelta(cartItem.product.id!, delta);
         }
       }
       // Restore stock for removed items that were in old bill
       for (const oldItem of oldItems) {
         const stillInCart = cart.find(c => c.product.id === oldItem.productId);
         if (!stillInCart) {
-          if (oldItem.productId < 0) {
-            await adjustWarehouseStock(oldItem.productId, -oldItem.quantity);
-          } else {
-            const product = await db.products.get(oldItem.productId);
-            if (product) {
-              await db.products.update(oldItem.productId, { stock: product.stock + oldItem.quantity });
-            }
-            await adjustWarehouseStock(oldItem.productId, -oldItem.quantity);
-          }
+          await applyStockDelta(oldItem.productId, -oldItem.quantity);
         }
       }
 
@@ -586,15 +590,7 @@ export default function Kasir() {
       await db.transactionItems.bulkAdd(itemRecords);
 
       for (const item of cart) {
-        if (item.product.id! < 0) {
-          await adjustWarehouseStock(item.product.id!, item.qty);
-        } else {
-          const freshProduct = await db.products.get(item.product.id!);
-          if (freshProduct) {
-            await db.products.update(item.product.id!, { stock: freshProduct.stock - item.qty, updatedAt: new Date() });
-          }
-          await adjustWarehouseStock(item.product.id!, item.qty);
-        }
+        await applyStockDelta(item.product.id!, item.qty);
       }
 
       toast.success(`Bill ${receiptNumber} disimpan!`);
@@ -679,15 +675,7 @@ export default function Kasir() {
     if (!tx.id) return;
     const items = await db.transactionItems.where('transactionId').equals(tx.id).toArray();
     for (const item of items) {
-      if (item.productId < 0) {
-        await adjustWarehouseStock(item.productId, -item.quantity);
-      } else {
-        const product = await db.products.get(item.productId);
-        if (product) {
-          await db.products.update(item.productId, { stock: product.stock + item.quantity });
-        }
-        await adjustWarehouseStock(item.productId, -item.quantity);
-      }
+      await applyStockDelta(item.productId, -item.quantity);
     }
     await db.transactionItems.where('transactionId').equals(tx.id).delete();
     await db.transactions.delete(tx.id);
@@ -763,29 +751,13 @@ export default function Kasir() {
         const newQty = cartItem.qty;
         const delta = newQty - oldQty;
         if (delta !== 0) {
-          if (cartItem.product.id! < 0) {
-            await adjustWarehouseStock(cartItem.product.id!, delta);
-          } else {
-            const freshProduct = await db.products.get(cartItem.product.id!);
-            if (freshProduct) {
-              await db.products.update(cartItem.product.id!, { stock: freshProduct.stock - delta, updatedAt: new Date() });
-            }
-            await adjustWarehouseStock(cartItem.product.id!, delta);
-          }
+          await applyStockDelta(cartItem.product.id!, delta);
         }
       }
       for (const oldItem of oldItems) {
         const stillInCart = cart.find(c => c.product.id === oldItem.productId);
         if (!stillInCart) {
-          if (oldItem.productId < 0) {
-            await adjustWarehouseStock(oldItem.productId, -oldItem.quantity);
-          } else {
-            const product = await db.products.get(oldItem.productId);
-            if (product) {
-              await db.products.update(oldItem.productId, { stock: product.stock + oldItem.quantity });
-            }
-            await adjustWarehouseStock(oldItem.productId, -oldItem.quantity);
-          }
+          await applyStockDelta(oldItem.productId, -oldItem.quantity);
         }
       }
 
@@ -835,15 +807,7 @@ export default function Kasir() {
       await db.transactionItems.bulkAdd(itemRecords);
 
       for (const item of cart) {
-        if (item.product.id! < 0) {
-          await adjustWarehouseStock(item.product.id!, item.qty);
-        } else {
-          const freshProduct = await db.products.get(item.product.id!);
-          if (freshProduct) {
-            await db.products.update(item.product.id!, { stock: freshProduct.stock - item.qty, updatedAt: new Date() });
-          }
-          await adjustWarehouseStock(item.product.id!, item.qty);
-        }
+        await applyStockDelta(item.product.id!, item.qty);
       }
 
       toast.success(`Transaksi berhasil! ${receiptNumber}`);
