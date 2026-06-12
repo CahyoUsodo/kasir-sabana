@@ -49,6 +49,7 @@ export default function Laporan() {
 
   const warehouseItems = useLiveQuery(() => db.warehouseItems.where('isDeleted').equals(0).toArray());
   const productRecipes = useLiveQuery(() => db.productRecipes.toArray());
+  const dailyPrepFormulas = useLiveQuery(() => db.dailyPrepFormulas.toArray());
 
   // Permission gate after all hooks have been called.
   if (!can('view_reports')) {
@@ -118,6 +119,28 @@ export default function Laporan() {
 
   const rp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
 
+  const isDateInSelectedPeriod = (dateStr?: string) => {
+    if (!dateStr) return false;
+
+    const date = startOfDay(new Date(`${dateStr}T00:00:00`));
+    if (Number.isNaN(date.getTime())) return false;
+
+    if (period === 'custom') {
+      if (dateFrom && dateTo) {
+        return date >= startOfDay(dateFrom) && date <= endOfDay(dateTo);
+      }
+      if (dateFrom) {
+        return date >= startOfDay(dateFrom);
+      }
+      if (dateTo) {
+        return date <= endOfDay(dateTo);
+      }
+      return false;
+    }
+
+    return date >= startOfDay(subDays(new Date(), days));
+  };
+
   const stockReport = (() => {
     if (!warehouseItems) return [];
     
@@ -141,6 +164,14 @@ export default function Laporan() {
           }
         });
       }
+    });
+
+    const prepSourceIds = new Set((dailyPrepFormulas ?? []).map(formula => formula.prepItemId));
+    warehouseItems.forEach(item => {
+      if (!prepSourceIds.has(item.id!)) return;
+      if (!isDateInSelectedPeriod(item.lastPreparedDate)) return;
+
+      usedMap[item.id!] += item.dailyPrepQty || 0;
     });
 
     return warehouseItems.map(item => {
