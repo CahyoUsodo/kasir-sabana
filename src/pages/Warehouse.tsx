@@ -998,7 +998,7 @@ export default function WarehousePage() {
             </div>
           </div>
         </DialogContent>
-      </Dialog>log>
+      </Dialog>
     </div>
   );
 }
