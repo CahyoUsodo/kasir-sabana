@@ -18,7 +18,37 @@ export default function StockReport() {
   const days = Number(period);
   const since = startOfDay(subDays(new Date(), days));
 
-  const products = useLiveQuery(() => db.products.toArray());
+  const products = useLiveQuery(async () => {
+    const rawProducts = await db.products.toArray();
+    const productRecipes = await db.productRecipes.toArray();
+    const visibleWarehouseItems = await db.warehouseItems.where('isDeleted').equals(0).toArray();
+    const todayStr = new Date().toLocaleDateString('en-CA');
+
+    return rawProducts.map(p => {
+      const recipes = productRecipes.filter(r => r.productId === p.id);
+      if (recipes.length > 0) {
+        let minStock = Infinity;
+        for (const recipe of recipes) {
+          const whItem = visibleWarehouseItems.find(wi => wi.id === recipe.warehouseItemId);
+          if (whItem) {
+            const isResetToday = whItem.isDailyReset === 1 && whItem.lastPreparedDate !== todayStr;
+            const effectiveStock = isResetToday ? 0 : whItem.stock;
+            const available = Math.floor(effectiveStock / recipe.quantity);
+            if (available < minStock) {
+              minStock = available;
+            }
+          } else {
+            minStock = 0;
+          }
+        }
+        return {
+          ...p,
+          stock: minStock === Infinity ? 0 : minStock
+        };
+      }
+      return p;
+    });
+  });
   const stockIns = useLiveQuery(async () => db.stockIns.where('date').aboveOrEqual(since).toArray(), [days]);
   const stockOuts = useLiveQuery(async () => db.stockOuts.where('date').aboveOrEqual(since).toArray(), [days]);
 

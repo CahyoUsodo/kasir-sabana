@@ -190,8 +190,11 @@ export interface WarehouseItem {
   unit: string;
   isCashierVisible: number; // 0 = no, 1 = yes
   price?: number; // selling price at cashier (default 0)
-  isDailyReset: number; // 0 = no, 1 = yes (for chicken pieces)
+  isDailyReset: number; // 0 = no, 1 = yes (for chicken pieces or opening preps)
   lastPreparedDate?: string; // YYYY-MM-DD
+  dailyPrepQty?: number; // total quantity of this batch/item prepped today
+  dailyPrepFactor?: number; // formula factor per batch prepared (default 1)
+  photo?: string; // base64 JPEG compressed via compressImage()
   isDeleted: number; // 0 = active, 1 = deleted
   createdAt: Date;
   updatedAt: Date;
@@ -475,6 +478,37 @@ class PosDatabase extends Dexie {
       users:            '++id, &username, role, isActive',
       warehouseItems:   '++id, name, isDeleted, isCashierVisible, isDailyReset',
       productRecipes:   '++id, productId, warehouseItemId',
+    });
+
+    // Version 9 — Warehouse photos & Prep Factors/Tracking
+    this.version(9).stores({
+      categories:       '++id, name, isDeleted',
+      products:         '++id, name, &sku, categoryId, barcode, isDeleted, createdBy, updatedBy',
+      suppliers:        '++id, name, isDeleted',
+      stockIns:         '++id, productId, supplierId, date, createdBy',
+      stockOuts:        '++id, productId, date, createdBy',
+      hppHistory:       '++id, productId, date',
+      paymentMethods:   '++id, name, category',
+      transactions:     '++id, date, &receiptNumber, paymentMethodId, status, orderNumber, createdBy',
+      transactionItems: '++id, transactionId, productId',
+      storeSettings:    '++id',
+      units:            '++id, &name, isDeleted',
+      users:            '++id, &username, role, isActive',
+      warehouseItems:   '++id, name, isDeleted, isCashierVisible, isDailyReset',
+      productRecipes:   '++id, productId, warehouseItemId',
+    }).upgrade(async (tx) => {
+      const whTable = tx.table('warehouseItems');
+      await whTable.toCollection().modify((item: Partial<WarehouseItem>) => {
+        if (item.dailyPrepQty === undefined) item.dailyPrepQty = 0;
+        if (item.dailyPrepFactor === undefined) {
+          // Backward-compatible defaults for chicken items
+          if (item.name === 'Paha Bawah') item.dailyPrepFactor = 2;
+          else if (item.name === 'Paha Atas') item.dailyPrepFactor = 2;
+          else if (item.name === 'Sayap') item.dailyPrepFactor = 2;
+          else if (item.name === 'Dada') item.dailyPrepFactor = 3;
+          else item.dailyPrepFactor = 1;
+        }
+      });
     });
   }
 }

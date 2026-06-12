@@ -30,7 +30,37 @@ export default function Dashboard() {
     return open.length;
   }, []);
 
-  const lowStockProducts = useLiveQuery(() => db.products.filter(p => p.isDeleted === 0 && p.stock <= 5).toArray());
+  const lowStockProducts = useLiveQuery(async () => {
+    const products = await db.products.where('isDeleted').equals(0).toArray();
+    const productRecipes = await db.productRecipes.toArray();
+    const visibleWarehouseItems = await db.warehouseItems.where('isDeleted').equals(0).toArray();
+    const todayStr = new Date().toLocaleDateString('en-CA');
+
+    return products.map(p => {
+      const recipes = productRecipes.filter(r => r.productId === p.id);
+      if (recipes.length > 0) {
+        let minStock = Infinity;
+        for (const recipe of recipes) {
+          const whItem = visibleWarehouseItems.find(wi => wi.id === recipe.warehouseItemId);
+          if (whItem) {
+            const isResetToday = whItem.isDailyReset === 1 && whItem.lastPreparedDate !== todayStr;
+            const effectiveStock = isResetToday ? 0 : whItem.stock;
+            const available = Math.floor(effectiveStock / recipe.quantity);
+            if (available < minStock) {
+              minStock = available;
+            }
+          } else {
+            minStock = 0;
+          }
+        }
+        return {
+          ...p,
+          stock: minStock === Infinity ? 0 : minStock
+        };
+      }
+      return p;
+    }).filter(p => p.stock <= 5);
+  }, []);
 
   const recentTransactions = useLiveQuery(() =>
     db.transactions.orderBy('date').reverse().limit(5).toArray()

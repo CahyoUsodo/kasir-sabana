@@ -246,6 +246,7 @@ export default function Kasir() {
     hpp: 0,
     stock: item.stock,
     unit: item.unit,
+    photo: item.photo, // Maps photo from warehouse item
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
     isDeleted: 0,

@@ -1,9 +1,10 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type WarehouseItem, type Product } from '@/lib/db';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Warehouse, Plus, Trash2, Edit2, ChevronLeft, ArrowRight,
-  TrendingDown, Check, Scale, X, Layers, AlertCircle, ShoppingBag
+  TrendingDown, Check, Scale, X, Layers, AlertCircle, ShoppingBag,
+  Camera, Minus
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -22,6 +23,7 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { toast } from 'sonner';
+import { compressImage } from '@/lib/image-utils';
 
 export default function WarehousePage() {
   const warehouseItems = useLiveQuery(() => 
@@ -36,7 +38,7 @@ export default function WarehousePage() {
     db.productRecipes.toArray()
   );
 
-  // Daily Reset check
+  // Daily Reset check (can be chicken or custom opening preps)
   const chickenItems = useLiveQuery(() => 
     db.warehouseItems.where('isDailyReset').equals(1).toArray()
   );
@@ -52,7 +54,11 @@ export default function WarehousePage() {
   const [isCashierVisible, setIsCashierVisible] = useState(false);
   const [itemPrice, setItemPrice] = useState('0');
   const [isDailyReset, setIsDailyReset] = useState(false);
+  const [dailyPrepFactor, setDailyPrepFactor] = useState('1');
+  const [photo, setPhoto] = useState<string | undefined>(undefined);
   const [itemEditId, setItemEditId] = useState<number | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Recipe Dialog states
   const [recipeDialog, setRecipeDialog] = useState(false);
@@ -63,6 +69,24 @@ export default function WarehousePage() {
   // Daily Prep states
   const [prepDialog, setPrepDialog] = useState(false);
   const [prepCount, setPrepCount] = useState('1');
+  const [prepItemId, setPrepItemId] = useState<number | null>(null);
+
+  // Photo change handler
+  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error('File harus berupa gambar');
+      return;
+    }
+    try {
+      const compressed = await compressImage(file);
+      setPhoto(compressed);
+    } catch {
+      toast.error('Gagal memproses gambar');
+    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   // Handle Item Save
   const saveItem = async () => {
@@ -70,6 +94,7 @@ export default function WarehousePage() {
     const now = new Date();
     const parsedStock = parseFloat(itemStock) || 0;
     const parsedPrice = parseFloat(itemPrice) || 0;
+    const parsedFactor = parseFloat(dailyPrepFactor) || 1;
 
     try {
       if (itemEditId) {
@@ -80,6 +105,8 @@ export default function WarehousePage() {
           isCashierVisible: isCashierVisible ? 1 : 0,
           price: parsedPrice,
           isDailyReset: isDailyReset ? 1 : 0,
+          dailyPrepFactor: parsedFactor,
+          photo: photo,
           updatedAt: now
         });
         toast.success('Stok barang berhasil diperbarui');
@@ -91,7 +118,10 @@ export default function WarehousePage() {
           isCashierVisible: isCashierVisible ? 1 : 0,
           price: parsedPrice,
           isDailyReset: isDailyReset ? 1 : 0,
+          dailyPrepFactor: parsedFactor,
+          photo: photo,
           lastPreparedDate: '',
+          dailyPrepQty: 0,
           isDeleted: 0,
           createdAt: now,
           updatedAt: now
@@ -120,6 +150,8 @@ export default function WarehousePage() {
     setIsCashierVisible(item.isCashierVisible === 1);
     setItemPrice((item.price || 0).toString());
     setIsDailyReset(item.isDailyReset === 1);
+    setDailyPrepFactor((item.dailyPrepFactor || 1).toString());
+    setPhoto(item.photo);
     setItemDialog(true);
   };
 
@@ -143,6 +175,8 @@ export default function WarehousePage() {
     setIsCashierVisible(false);
     setItemPrice('0');
     setIsDailyReset(false);
+    setDailyPrepFactor('1');
+    setPhoto(undefined);
   };
 
   // Recipe logic
@@ -210,53 +244,190 @@ export default function WarehousePage() {
     }
   };
 
-  // Daily Prep "Ayam Potong 9"
+  // Process Daily Prep (Multi-item support)
   const processDailyPrep = async () => {
     const counts = parseInt(prepCount) || 0;
-    if (counts <= 0) return;
+    if (counts === 0) return;
 
-    // 1 chicken = 2 paha bawah, 2 paha atas, 2 sayap, 3 dada
+    const todayStr = new Date().toLocaleDateString('en-CA');
+
+    try {
+      if (prepItemId) {
+        // Prepare single custom item
+        const item = await db.warehouseItems.get(prepItemId);
+        if (item) {
+          const factor = item.dailyPrepFactor || 1;
+          const addQty = factor * counts;
+          const isNewDay = item.lastPreparedDate !== todayStr;
+          
+          const currentPrepQty = isNewDay ? 0 : (item.dailyPrepQty || 0);
+          const newPrepQty = Math.max(0, currentPrepQty + counts);
+          
+          let newStock = item.stock + addQty;
+          if (isNewDay) {
+            newStock = addQty;
+          } else if (newPrepQty === 0) {
+            newStock = Math.max(0, item.stock - (currentPrepQty * factor));
+          } else {
+            // Adjust based on change
+            newStock = Math.max(0, item.stock + (counts * factor));
+          }
+
+          await db.warehouseItems.update(item.id!, {
+            stock: newStock,
+            dailyPrepQty: newPrepQty,
+            lastPreparedDate: todayStr,
+            updatedAt: new Date()
+          });
+          toast.success(`Berhasil memperbarui persiapan ${item.name} harian!`);
+        }
+      } else {
+        // Standard "Ayam Potong 9" Batch (All chicken pieces)
+        const formulas = [
+          { name: 'Paha Bawah', factor: 2 },
+          { name: 'Paha Atas', factor: 2 },
+          { name: 'Sayap', factor: 2 },
+          { name: 'Dada', factor: 3 }
+        ];
+
+        for (const formula of formulas) {
+          const item = await db.warehouseItems
+            .where('name')
+            .equalsIgnoreCase(formula.name)
+            .first();
+
+          if (item) {
+            const addQty = formula.factor * counts;
+            const isNewDay = item.lastPreparedDate !== todayStr;
+            
+            const currentPrepQty = isNewDay ? 0 : (item.dailyPrepQty || 0);
+            const newPrepQty = Math.max(0, currentPrepQty + counts);
+            
+            let newStock = item.stock + addQty;
+            if (isNewDay) {
+              newStock = addQty;
+            } else if (newPrepQty === 0) {
+              newStock = Math.max(0, item.stock - (currentPrepQty * formula.factor));
+            } else {
+              newStock = Math.max(0, item.stock + (counts * formula.factor));
+            }
+
+            await db.warehouseItems.update(item.id!, {
+              stock: newStock,
+              dailyPrepQty: newPrepQty,
+              lastPreparedDate: todayStr,
+              updatedAt: new Date()
+            });
+          }
+        }
+        toast.success(`Berhasil memperbarui persiapan ${counts} ekor Ayam Potong 9!`);
+      }
+      setPrepDialog(false);
+    } catch (err) {
+      console.error(err);
+      toast.error('Gagal memproses persiapan harian');
+    }
+  };
+
+  // Adjust prep directly (increment / decrement by 1 batch)
+  const adjustPrepQty = async (item: WarehouseItem, delta: number) => {
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    const factor = item.dailyPrepFactor || 1;
+    const isNewDay = item.lastPreparedDate !== todayStr;
+    const currentPrep = isNewDay ? 0 : (item.dailyPrepQty || 0);
+    const newPrep = currentPrep + delta;
+
+    if (newPrep < 0) {
+      toast.error('Jumlah persiapan tidak bisa kurang dari 0');
+      return;
+    }
+
+    try {
+      let newStock = item.stock + (delta * factor);
+      if (isNewDay) {
+        newStock = Math.max(0, delta * factor);
+      } else {
+        newStock = Math.max(0, newStock);
+      }
+
+      await db.warehouseItems.update(item.id!, {
+        stock: newStock,
+        dailyPrepQty: newPrep,
+        lastPreparedDate: todayStr,
+        updatedAt: new Date()
+      });
+      toast.success(`Berhasil memperbarui persiapan ${item.name}`);
+    } catch (err) {
+      console.error(err);
+      toast.error('Gagal memperbarui persiapan');
+    }
+  };
+
+  // Adjust standard Ayam Potong 9 prep count (+/-)
+  const adjustAyamPrep = async (delta: number) => {
+    const todayStr = new Date().toLocaleDateString('en-CA');
     const formulas = [
       { name: 'Paha Bawah', factor: 2 },
       { name: 'Paha Atas', factor: 2 },
       { name: 'Sayap', factor: 2 },
       { name: 'Dada', factor: 3 }
     ];
-
-    const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD local format
+    
+    // Check current prep from Paha Bawah
+    const pahaBawah = chickenItems?.find(item => item.name.toLowerCase() === 'paha bawah');
+    const currentPrep = pahaBawah && pahaBawah.lastPreparedDate === todayStr ? (pahaBawah.dailyPrepQty || 0) : 0;
+    const newPrep = currentPrep + delta;
+    if (newPrep < 0) {
+      toast.error('Jumlah persiapan tidak bisa kurang dari 0');
+      return;
+    }
 
     try {
       for (const formula of formulas) {
-        const item = await db.warehouseItems
-          .where('name')
-          .equalsIgnoreCase(formula.name)
-          .first();
-
+        const item = warehouseItems?.find(wi => wi.name.toLowerCase() === formula.name.toLowerCase());
         if (item) {
-          const addQty = formula.factor * counts;
-          // SOP: ganti hari ganti ayam. If this is the first prep of a new day, we reset stock first.
-          let newStock = item.stock + addQty;
-          if (item.lastPreparedDate !== todayStr) {
-            newStock = addQty; // Reset previous day stock and set to new prep
+          const isNewDay = item.lastPreparedDate !== todayStr;
+          const currentItemPrep = isNewDay ? 0 : (item.dailyPrepQty || 0);
+          const newItemPrep = Math.max(0, currentItemPrep + delta);
+          
+          let newStock = item.stock + (delta * formula.factor);
+          if (isNewDay) {
+            newStock = Math.max(0, delta * formula.factor);
+          } else {
+            newStock = Math.max(0, newStock);
           }
+
           await db.warehouseItems.update(item.id!, {
             stock: newStock,
+            dailyPrepQty: newItemPrep,
             lastPreparedDate: todayStr,
             updatedAt: new Date()
           });
         }
       }
-      toast.success(`Berhasil memproses persiapan ${counts} ekor Ayam Potong 9 untuk hari ini!`);
-      setPrepDialog(false);
+      toast.success(`Berhasil memperbarui persiapan Ayam Potong 9`);
     } catch (err) {
       console.error(err);
-      toast.error('Gagal memproses persiapan ayam harian');
+      toast.error('Gagal memperbarui persiapan ayam');
     }
   };
 
-  // Check if chicken needs daily preparation
+  // Check if chicken or custom daily resets need preparation today
   const todayStr = new Date().toLocaleDateString('en-CA');
   const needsPrep = chickenItems && chickenItems.length > 0 && chickenItems.some(item => item.lastPreparedDate !== todayStr);
+
+  const pahaBawahItem = chickenItems?.find(item => item.name.toLowerCase() === 'paha bawah');
+  const ayamPrepQty = pahaBawahItem && pahaBawahItem.lastPreparedDate === todayStr ? (pahaBawahItem.dailyPrepQty || 0) : 0;
+
+  // Custom (non-standard chicken) prep items
+  const standardChickenNames = ['paha bawah', 'paha atas', 'sayap', 'dada'];
+  const customPrepItems = warehouseItems?.filter(item => 
+    item.isDailyReset === 1 && !standardChickenNames.includes(item.name.toLowerCase())
+  ) || [];
+
+  const prepItemName = prepItemId ? warehouseItems?.find(wi => wi.id === prepItemId)?.name : '';
+  const prepItemUnit = prepItemId ? warehouseItems?.find(wi => wi.id === prepItemId)?.unit : '';
+  const prepItemFactor = prepItemId ? (warehouseItems?.find(wi => wi.id === prepItemId)?.dailyPrepFactor || 1) : 1;
 
   return (
     <div className="px-4 pt-6 pb-24 space-y-5">
@@ -278,13 +449,15 @@ export default function WarehousePage() {
           <CardContent className="p-4 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
             <div className="flex-1 space-y-1">
-              <p className="text-sm font-semibold text-warning-foreground">Persiapan Ayam Hari Ini Belum Diisi</p>
+              <p className="text-sm font-semibold text-warning-foreground">Persiapan Hari Ini Belum Lengkap</p>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Berdasarkan SOP Sabana Fried Chicken, stok potongan ayam harian harus disiapkan ulang setiap hari. Hari ini Anda belum memasukkan jumlah persiapan Ayam Potong 9.
+                Beberapa stok persiapan harian belum dimasukkan untuk hari ini. Pastikan untuk melakukan persiapan opening toko.
               </p>
-              <Button size="sm" className="mt-2 text-xs bg-warning text-warning-foreground hover:bg-warning/95" onClick={() => setPrepDialog(true)}>
-                Input Persiapan Hari Ini
-              </Button>
+              <div className="flex gap-2 mt-2">
+                <Button size="sm" className="text-xs bg-warning text-warning-foreground hover:bg-warning/95" onClick={() => { setPrepItemId(null); setPrepCount('1'); setPrepDialog(true); }}>
+                  Persiapan Ayam Potong 9
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -310,26 +483,35 @@ export default function WarehousePage() {
             {warehouseItems?.map(item => (
               <Card key={item.id} className="border-0 shadow-sm overflow-hidden">
                 <CardContent className="p-4 flex items-center justify-between">
-                  <div className="space-y-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-sm font-semibold truncate">{item.name}</p>
-                      {item.isDailyReset === 1 && (
-                        <Badge className="text-[9px] h-4 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 border-0">Ayam Harian</Badge>
-                      )}
-                      {item.isCashierVisible === 1 && (
-                        <Badge className="text-[9px] h-4 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-0">Kasir</Badge>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-12 h-12 rounded-lg bg-muted border flex items-center justify-center overflow-hidden shrink-0">
+                      {item.photo ? (
+                        <img src={item.photo} alt={item.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <Warehouse className="w-5 h-5 text-muted-foreground" />
                       )}
                     </div>
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <span>Stok:</span>
-                      <span className="font-bold text-foreground">{item.stock} {item.unit}</span>
-                      {item.isCashierVisible === 1 && item.price && (
-                        <>
-                          <span className="mx-1">•</span>
-                          <span>Harga Kasir:</span>
-                          <span className="font-semibold text-foreground">Rp {item.price.toLocaleString('id-ID')}</span>
-                        </>
-                      )}
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-sm font-semibold truncate">{item.name}</p>
+                        {item.isDailyReset === 1 && (
+                          <Badge className="text-[9px] h-4 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 border-0">Harian</Badge>
+                        )}
+                        {item.isCashierVisible === 1 && (
+                          <Badge className="text-[9px] h-4 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-0">Kasir</Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <span>Stok:</span>
+                        <span className="font-bold text-foreground">{item.stock} {item.unit}</span>
+                        {item.isCashierVisible === 1 && item.price && (
+                          <>
+                            <span className="mx-1">•</span>
+                            <span>Harga:</span>
+                            <span className="font-semibold text-foreground">Rp {item.price.toLocaleString('id-ID')}</span>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -416,48 +598,135 @@ export default function WarehousePage() {
           </div>
         </TabsContent>
 
-        {/* Tab 3: Persiapan Harian (Ayam) */}
+        {/* Tab 3: Persiapan Harian */}
         <TabsContent value="daily" className="mt-4 space-y-4">
-          <Card className="border-0 shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-1.5"><Layers className="w-4 h-4 text-primary" /> Persiapan Harian Ayam Potong 9</CardTitle>
-              <CardDescription className="text-xs">
-                Masukkan jumlah ekor Ayam Potong 9 yang dipotong dan disiapkan hari ini.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="bg-primary/5 rounded-xl p-4 space-y-2">
-                <p className="text-xs font-bold text-primary flex items-center gap-1"><Scale className="w-3.5 h-3.5" /> Rumus Pemotongan Ayam Potong 9 (Per Ekor):</p>
-                <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                  <div className="flex justify-between border-b pb-1"><span>• Paha Bawah</span> <span className="font-semibold text-foreground">2 pcs</span></div>
-                  <div className="flex justify-between border-b pb-1"><span>• Paha Atas</span> <span className="font-semibold text-foreground">2 pcs</span></div>
-                  <div className="flex justify-between border-b pb-1"><span>• Sayap</span> <span className="font-semibold text-foreground">2 pcs</span></div>
-                  <div className="flex justify-between border-b pb-1"><span>• Dada</span> <span className="font-semibold text-foreground">3 pcs</span></div>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex justify-between items-center text-xs text-muted-foreground border-b pb-2">
-                  <span>Status Hari Ini ({new Date().toLocaleDateString('id-ID')})</span>
-                  {needsPrep ? (
-                    <Badge variant="destructive" className="text-[10px] h-5">Belum Persiapan</Badge>
-                  ) : (
-                    <Badge className="text-[10px] h-5 bg-success hover:bg-success/95 text-success-foreground">Sudah Persiapan</Badge>
-                  )}
+          {/* Section 1: Ayam Potong 9 */}
+          {chickenItems && chickenItems.length > 0 && (
+            <Card className="border-0 shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-1.5 justify-between">
+                  <span className="flex items-center gap-1.5"><Layers className="w-4 h-4 text-primary" /> Persiapan Ayam Potong 9</span>
+                  <Badge variant={ayamPrepQty > 0 ? "outline" : "destructive"} className="text-[10px]">
+                    {ayamPrepQty > 0 ? `Sudah Persiapan: ${ayamPrepQty} Ekor` : 'Belum Persiapan'}
+                  </Badge>
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  SOP Pemotongan Ayam Sabana: 1 ekor ayam menghasilkan 2 Paha Bawah, 2 Paha Atas, 2 Sayap, dan 3 Dada.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between p-3 bg-muted/40 rounded-xl">
+                  <div className="space-y-0.5">
+                    <span className="text-xs text-muted-foreground">Total Ayam Dipersiapkan</span>
+                    <p className="text-lg font-bold">{ayamPrepQty} Ekor</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button 
+                      variant="outline" 
+                      size="icon" 
+                      onClick={() => adjustAyamPrep(-1)}
+                      className="w-9 h-9"
+                    >
+                      <Minus className="w-4 h-4" />
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="icon" 
+                      onClick={() => adjustAyamPrep(1)}
+                      className="w-9 h-9"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                    <Button 
+                      size="sm"
+                      onClick={() => { setPrepItemId(null); setPrepCount('1'); setPrepDialog(true); }}
+                      className="text-xs h-9"
+                    >
+                      Set Jumlah
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   {chickenItems?.map(item => (
-                    <div key={item.id} className="p-3 bg-muted/50 rounded-lg flex flex-col justify-between h-16">
+                    <div key={item.id} className="p-3 bg-muted/30 rounded-lg flex flex-col justify-between h-16 border">
                       <span className="text-xs font-semibold text-muted-foreground">{item.name}</span>
-                      <span className="text-sm font-bold">{item.stock} {item.unit}</span>
+                      <div className="flex justify-between items-baseline">
+                        <span className="text-sm font-bold">{item.stock} {item.unit}</span>
+                        {item.lastPreparedDate === todayStr && item.dailyPrepQty ? (
+                          <span className="text-[10px] text-primary-foreground bg-primary px-1.5 py-0.5 rounded font-medium">
+                            +{item.dailyPrepQty * (item.name.toLowerCase() === 'dada' ? 3 : 2)} pcs hari ini
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                   ))}
                 </div>
+              </CardContent>
+            </Card>
+          )}
 
-                <Button className="w-full h-11 font-semibold" onClick={() => setPrepDialog(true)}>
-                  Mulai Persiapan Ayam Hari Ini
-                </Button>
+          {/* Section 2: Persiapan Mandiri / Lainnya */}
+          <Card className="border-0 shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-1.5"><Scale className="w-4 h-4 text-primary" /> Persiapan Harian Mandiri</CardTitle>
+              <CardDescription className="text-xs">
+                Daftar barang gudang custom yang perlu dipersiapkan saat opening toko (misal: Es Batu, Bumbu, dll).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="divide-y divide-border">
+                {customPrepItems.map(item => {
+                  const prepQty = item.lastPreparedDate === todayStr ? (item.dailyPrepQty || 0) : 0;
+                  return (
+                    <div key={item.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 first:pt-0 last:pb-0">
+                      <div className="space-y-0.5">
+                        <span className="text-xs font-bold text-foreground">{item.name}</span>
+                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                          <span>Stok: <strong>{item.stock} {item.unit}</strong></span>
+                          <span>•</span>
+                          <span>Faktor Pengali: <strong>{item.dailyPrepFactor || 1}</strong></span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 justify-between sm:justify-end">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          Dipersiapkan: <strong className="text-foreground text-sm">{prepQty}</strong> kali
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <Button 
+                            variant="outline" 
+                            size="icon" 
+                            onClick={() => adjustPrepQty(item, -1)}
+                            className="w-8 h-8"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            size="icon" 
+                            onClick={() => adjustPrepQty(item, 1)}
+                            className="w-8 h-8"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button 
+                            variant="ghost"
+                            size="sm" 
+                            onClick={() => { setPrepItemId(item.id!); setPrepCount('1'); setPrepDialog(true); }}
+                            className="text-[11px] h-8 px-2 hover:bg-muted"
+                          >
+                            Set Qty
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {customPrepItems.length === 0 && (
+                  <div className="py-6 text-center text-xs text-muted-foreground">
+                    Belum ada barang persiapan mandiri. Edit barang gudang dan centang "Masuk Persiapan Harian?".
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -473,7 +742,42 @@ export default function WarehousePage() {
               Buat atau perbarui barang/bahan baku untuk stok di gudang.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 mt-2">
+          <div className="space-y-4 mt-2 max-h-[75vh] overflow-y-auto pr-1">
+            {/* Foto Barang */}
+            <div className="flex flex-col items-center gap-2 pb-2">
+              <Label className="text-xs font-semibold self-start">Foto Barang</Label>
+              <div className="relative w-24 h-24 rounded-lg bg-muted border flex items-center justify-center overflow-hidden">
+                {photo ? (
+                  <>
+                    <img src={photo} alt="Preview" className="w-full h-full object-cover" />
+                    <button 
+                      type="button" 
+                      onClick={() => setPhoto(undefined)}
+                      className="absolute top-1 right-1 p-1 bg-destructive text-destructive-foreground rounded-full hover:bg-destructive/90"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex flex-col items-center gap-1 text-muted-foreground hover:text-foreground w-full h-full justify-center"
+                  >
+                    <Camera className="w-6 h-6" />
+                    <span className="text-[10px]">Pilih Foto</span>
+                  </button>
+                )}
+              </div>
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handlePhotoSelect} 
+                accept="image/*" 
+                className="hidden" 
+              />
+            </div>
+
             <div className="space-y-1.5">
               <Label>Nama Barang</Label>
               <Input value={itemName} onChange={e => setItemName(e.target.value)} placeholder="Contoh: Plastik Kecil, Dada Ayam" className="h-11" />
@@ -507,11 +811,18 @@ export default function WarehousePage() {
 
             <div className="flex items-center justify-between p-3 bg-muted/30 rounded-xl">
               <div className="space-y-0.5">
-                <Label className="text-xs font-semibold">Ayam Potong Harian?</Label>
-                <p className="text-[10px] text-muted-foreground">Aktifkan untuk potongan ayam (dada, paha, sayap) yang wajib reset setiap ganti hari.</p>
+                <Label className="text-xs font-semibold">Masuk Persiapan Harian?</Label>
+                <p className="text-[10px] text-muted-foreground">Aktifkan untuk item yang perlu dipersiapkan/di-input jumlah persiapannya saat opening toko.</p>
               </div>
               <Switch checked={isDailyReset} onCheckedChange={setIsDailyReset} />
             </div>
+
+            {isDailyReset && (
+              <div className="space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                <Label>Faktor Persiapan (Pengali Stok per 1 Unit Persiapan)</Label>
+                <Input type="number" value={dailyPrepFactor} onChange={e => setDailyPrepFactor(e.target.value)} className="h-11" placeholder="Contoh: 1 untuk pcs, 2 untuk paha bawah per ekor" />
+              </div>
+            )}
 
             <Button className="w-full h-11 font-semibold" onClick={saveItem} disabled={!itemName.trim()}>
               Simpan Barang
@@ -578,29 +889,38 @@ export default function WarehousePage() {
       <Dialog open={prepDialog} onOpenChange={setPrepDialog}>
         <DialogContent className="max-w-[95vw] rounded-xl sm:max-w-[400px]">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-1.5"><Layers className="w-5 h-5 text-primary" /> Persiapan Ayam Potong 9</DialogTitle>
+            <DialogTitle className="flex items-center gap-1.5">
+              <Layers className="w-5 h-5 text-primary" /> 
+              {prepItemId ? `Persiapan ${prepItemName}` : 'Persiapan Ayam Potong 9'}
+            </DialogTitle>
             <DialogDescription className="text-xs">
-              Masukkan berapa ekor Ayam Potong 9 yang Anda siapkan hari ini. Stok potongan ayam akan di-reset (ganti hari) dan diisi ulang sesuai rumus.
+              {prepItemId 
+                ? `Masukkan berapa unit ${prepItemName} yang Anda persiapkan hari ini.` 
+                : 'Masukkan berapa ekor Ayam Potong 9 yang Anda siapkan hari ini. Stok potongan ayam akan di-reset (ganti hari) dan diisi ulang sesuai rumus.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 mt-2">
             <div className="space-y-1.5">
-              <Label>Jumlah Ekor Ayam</Label>
+              <Label>{prepItemId ? 'Jumlah Unit Persiapan' : 'Jumlah Ekor Ayam'}</Label>
               <Input type="number" value={prepCount} onChange={e => setPrepCount(e.target.value)} className="h-11 text-center text-lg font-bold" min={1} />
             </div>
 
             <div className="text-xs text-muted-foreground p-3 bg-muted rounded-xl space-y-1">
-              <span className="font-semibold text-foreground">Hasil Potongan Ayam:</span>
-              <div className="grid grid-cols-2 gap-1 mt-1 text-[11px]">
-                <div>Paha Bawah: {(parseInt(prepCount) || 0) * 2} pcs</div>
-                <div>Paha Atas: {(parseInt(prepCount) || 0) * 2} pcs</div>
-                <div>Sayap: {(parseInt(prepCount) || 0) * 2} pcs</div>
-                <div>Dada: {(parseInt(prepCount) || 0) * 3} pcs</div>
-              </div>
+              <span className="font-semibold text-foreground">Hasil Persiapan:</span>
+              {prepItemId ? (
+                <div>Total penambahan stok: {(parseInt(prepCount) || 0) * prepItemFactor} {prepItemUnit}</div>
+              ) : (
+                <div className="grid grid-cols-2 gap-1 mt-1 text-[11px]">
+                  <div>Paha Bawah: {(parseInt(prepCount) || 0) * 2} pcs</div>
+                  <div>Paha Atas: {(parseInt(prepCount) || 0) * 2} pcs</div>
+                  <div>Sayap: {(parseInt(prepCount) || 0) * 2} pcs</div>
+                  <div>Dada: {(parseInt(prepCount) || 0) * 3} pcs</div>
+                </div>
+              )}
             </div>
 
             <Button className="w-full h-11 font-semibold" onClick={processDailyPrep} disabled={(parseInt(prepCount) || 0) <= 0}>
-              Proses Persiapan Ayam
+              Proses Persiapan
             </Button>
           </div>
         </DialogContent>
