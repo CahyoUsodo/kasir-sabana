@@ -7,13 +7,16 @@ import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
-import BackupReminder, { shouldShowBackupReminder, exportBackupData } from '@/components/BackupReminder';
+import BackupReminder, { shouldShowBackupReminder } from '@/components/BackupReminder';
 import { useAuth } from '@/hooks/use-auth';
 import type { PermissionKey } from '@/lib/db';
+import { performBackup } from '@/lib/backup';
+import { toast } from 'sonner';
 
 export default function Dashboard() {
   const { can } = useAuth();
   const [backupDismissed, setBackupDismissed] = useState(false);
+  const [isCloudBackuping, setIsCloudBackuping] = useState(false);
 
   const storeSettings = useLiveQuery(() => db.storeSettings.toCollection().first());
 
@@ -35,8 +38,18 @@ export default function Dashboard() {
     const productRecipes = await db.productRecipes.toArray();
     const visibleWarehouseItems = await db.warehouseItems.where('isDeleted').equals(0).toArray();
     const todayStr = new Date().toLocaleDateString('en-CA');
+    const normalizedName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
-    return products.map(p => {
+    const merged = new Map<string, { id: string; name: string; stock: number; unit: string; priority: number }>();
+    const upsert = (entry: { id: string; name: string; stock: number; unit: string; priority: number }) => {
+      const key = normalizedName(entry.name) || entry.id;
+      const existing = merged.get(key);
+      if (!existing || entry.priority > existing.priority || (entry.priority === existing.priority && entry.stock < existing.stock)) {
+        merged.set(key, { ...entry, stock: Math.max(0, entry.stock) });
+      }
+    };
+
+    for (const p of products) {
       const recipes = productRecipes.filter(r => r.productId === p.id);
       if (recipes.length > 0) {
         let minStock = Infinity;
@@ -53,18 +66,41 @@ export default function Dashboard() {
             minStock = 0;
           }
         }
-        return {
-          ...p,
-          stock: minStock === Infinity ? 0 : minStock
-        };
+        upsert({
+          id: `product-${p.id}`,
+          name: p.name,
+          stock: minStock === Infinity ? 0 : minStock,
+          unit: p.unit,
+          priority: 3,
+        });
+        continue;
       }
-      return p;
-    }).filter(p => p.stock <= 5);
+      upsert({
+        id: `product-${p.id}`,
+        name: p.name,
+        stock: p.stock,
+        unit: p.unit,
+        priority: 1,
+      });
+    }
+
+    for (const item of visibleWarehouseItems.filter(wi => wi.isCashierVisible === 1)) {
+      upsert({
+        id: `warehouse-${item.id}`,
+        name: item.name,
+        stock: item.stock,
+        unit: item.unit,
+        priority: 4,
+      });
+    }
+
+    return Array.from(merged.values()).filter(item => item.stock <= 5);
   }, []);
 
-  const recentTransactions = useLiveQuery(() =>
-    db.transactions.orderBy('date').reverse().limit(5).toArray()
-  );
+  const recentTransactions = useLiveQuery(async () => {
+    const rows = await db.transactions.orderBy('date').reverse().toArray();
+    return rows.filter(tx => tx.status !== 'open').slice(0, 5);
+  });
 
   // Query items for recent transactions
   const recentTxItems = useLiveQuery(async () => {
@@ -88,7 +124,23 @@ export default function Dashboard() {
   const totalProfit = todayTransactions?.reduce((sum, t) => sum + t.profit, 0) ?? 0;
   const txCount = todayTransactions?.length ?? 0;
 
-  const showBackup = !backupDismissed && storeSettings && shouldShowBackupReminder(storeSettings.lastBackupAt) && can('manage_backup');
+  const lastCloudBackupAt = storeSettings?.lastCloudBackupAt ?? storeSettings?.lastBackupAt ?? null;
+  const showBackup = !backupDismissed && storeSettings && shouldShowBackupReminder(lastCloudBackupAt) && can('manage_backup');
+
+  const handleCloudBackupReminder = async () => {
+    if (isCloudBackuping) return;
+    setIsCloudBackuping(true);
+    try {
+      await performBackup({ reason: 'manual' });
+      setBackupDismissed(true);
+      toast.success('Backup cloud berhasil disimpan');
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error?.message || 'Gagal melakukan backup cloud');
+    } finally {
+      setIsCloudBackuping(false);
+    }
+  };
 
   const quickActions: { to: string; icon: typeof ShoppingCart; label: string; color: string; perm?: PermissionKey }[] = [
     { to: '/cashier', icon: ShoppingCart, label: 'Kasir', color: 'bg-primary/10 text-primary', perm: 'create_transaction' },
@@ -96,6 +148,11 @@ export default function Dashboard() {
     { to: '/reports', icon: BarChart3, label: 'Laporan', color: 'bg-success/10 text-success', perm: 'view_reports' },
   ];
   const visibleActions = quickActions.filter((a) => !a.perm || can(a.perm));
+  const getRecentTxLabel = (txId: number, receiptNumber: string) => {
+    const names = (recentTxItems?.[txId] ?? []).map(item => item.productName).filter(Boolean);
+    if (names.length > 0) return names.join(', ');
+    return receiptNumber;
+  };
 
   return (
     <div className="px-4 pt-6 space-y-5">
@@ -108,9 +165,10 @@ export default function Dashboard() {
       {/* Backup Reminder */}
       {showBackup && (
         <BackupReminder
-          lastBackupAt={storeSettings?.lastBackupAt ?? null}
+          lastBackupAt={lastCloudBackupAt}
           onDismiss={() => setBackupDismissed(true)}
-          onBackup={exportBackupData}
+          onBackup={handleCloudBackupReminder}
+          buttonLabel={isCloudBackuping ? 'Menyimpan Cloud...' : 'Backup Cloud Sekarang'}
         />
       )}
 
@@ -199,8 +257,8 @@ export default function Dashboard() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
-                        <p className="text-xs text-muted-foreground truncate">{(recentTxItems?.[tx.id!] ?? []).map(i => i.productName).join(', ')}</p>
-                        <p className="text-[10px] text-muted-foreground shrink-0 ml-2">{format(new Date(tx.date), 'HH:mm')}</p>
+                        <p className="text-xs text-muted-foreground truncate">{getRecentTxLabel(tx.id!, tx.receiptNumber)}</p>
+                        <p className="text-[10px] text-muted-foreground shrink-0 ml-2">{format(new Date(tx.date), 'dd MMM, HH:mm', { locale: id })}</p>
                       </div>
                       <div className="flex items-center justify-between mt-0.5">
                         <p className="text-sm font-bold text-primary">Rp {tx.total.toLocaleString('id-ID')}</p>

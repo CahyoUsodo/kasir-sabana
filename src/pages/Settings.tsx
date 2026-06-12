@@ -18,7 +18,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp
 import PinVerificationDialog from '@/components/PinVerificationDialog';
 import { toast } from 'sonner';
 import { exportBackupData } from '@/components/BackupReminder';
-import { performBackup } from '@/lib/backup';
+import { performBackup, resolveCloudApiUrl } from '@/lib/backup';
 import { compressImage } from '@/lib/image-utils';
 import { useAuth } from '@/hooks/use-auth';
 import { createUser, hashPin, isValidPin, isValidUsername, saveSession } from '@/lib/auth';
@@ -297,8 +297,7 @@ export default function Pengaturan() {
       async () => {
         setIsRestoring(true);
         try {
-          const isCapacitor = window.location.origin.includes('localhost') || window.location.protocol === 'capacitor:';
-          const apiUrl = isCapacitor ? 'https://kasir-sabana-5bf1.vercel.app/api/restore' : '/api/restore';
+          const apiUrl = resolveCloudApiUrl('/api/restore');
 
           const response = await fetch(apiUrl, {
             method: 'POST',
@@ -1141,8 +1140,10 @@ export default function Pengaturan() {
             >
               <CloudUpload className="w-4 h-4" /> {isBackingUp ? 'Menyimpan...' : 'Backup ke Google Drive Sekarang'}
             </Button>
-            {storeSettings?.lastBackupAt && (
-              <p className="text-[10px] text-muted-foreground text-center">Terakhir backup: {new Date(storeSettings.lastBackupAt).toLocaleString('id-ID')}</p>
+            {(storeSettings?.lastCloudBackupAt || storeSettings?.lastBackupAt) && (
+              <p className="text-[10px] text-muted-foreground text-center">
+                Terakhir backup cloud: {new Date(storeSettings?.lastCloudBackupAt || storeSettings?.lastBackupAt || new Date()).toLocaleString('id-ID')}
+              </p>
             )}
           </div>
         </CardContent>

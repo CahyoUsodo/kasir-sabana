@@ -25,7 +25,7 @@ const queryClient = new QueryClient();
 
 import { useAutoBackup } from "@/hooks/useAutoBackup";
 
-import { db } from '@/lib/db';
+import { db, repairInventoryAnomalies } from '@/lib/db';
 
 const App = () => {
   useAutoBackup();
@@ -43,6 +43,8 @@ const App = () => {
         });
         await db.storeSettings.toCollection().modify((s: any) => {
           if (typeof s.lastBackupAt === 'string') s.lastBackupAt = new Date(s.lastBackupAt);
+          if (typeof s.lastCloudBackupAt === 'string') s.lastCloudBackupAt = new Date(s.lastCloudBackupAt);
+          if (typeof s.lastLocalExportAt === 'string') s.lastLocalExportAt = new Date(s.lastLocalExportAt);
         });
         await db.stockIns.toCollection().modify((s: any) => {
           if (typeof s.date === 'string') s.date = new Date(s.date);
@@ -53,6 +55,7 @@ const App = () => {
         await db.hppHistory.toCollection().modify((h: any) => {
           if (typeof h.date === 'string') h.date = new Date(h.date);
         });
+        await repairInventoryAnomalies();
       } catch (e) {
         console.error('Failed to fix dates', e);
       }

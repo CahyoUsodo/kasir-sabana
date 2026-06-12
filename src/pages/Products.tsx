@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Product, type Category, type ProductOption, type ProductOptionGroup, autoLinkChickenRecipes, upsertProductOptionRecipe } from '@/lib/db';
 import { useState, useRef } from 'react';
 import { Plus, Search, Edit2, Trash2, Package as PackageIcon, Camera, X, Settings2, Layers, Link as LinkIcon } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +20,7 @@ import { useAuth } from '@/hooks/use-auth';
 export default function Produk() {
   const { currentUser, can } = useAuth();
   const canManage = can('manage_products');
+  const navigate = useNavigate();
 
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState<string>('all');
@@ -65,6 +67,7 @@ export default function Produk() {
   const productOptions = useLiveQuery(() => db.productOptions.toArray());
   const productOptionRecipes = useLiveQuery(() => db.productOptionRecipes.toArray());
   const visibleWarehouseItems = useLiveQuery(() => db.warehouseItems.where('isDeleted').equals(0).toArray());
+  const dailyPrepFormulas = useLiveQuery(() => db.dailyPrepFormulas.toArray());
 
   // Compose dropdown options: active master units + current product's unit if it has been deleted/renamed
   const unitOptions = (() => {
@@ -74,6 +77,7 @@ export default function Produk() {
   })();
 
   const isLinkedToRecipe = editProduct ? (productRecipes?.some(r => r.productId === editProduct.id) ?? false) : false;
+  const getProductRecipeCount = (productId?: number) => (productRecipes ?? []).filter(recipe => recipe.productId === productId).length;
 
   const rawFiltered = products?.filter(p => {
     const q = search.toLowerCase();
@@ -128,6 +132,72 @@ export default function Produk() {
   const getWarehouseName = (warehouseItemId: number) => {
     const item = visibleWarehouseItems?.find(wi => wi.id === warehouseItemId);
     return item ? `${item.name} (${item.unit})` : `Bahan #${warehouseItemId}`;
+  };
+
+  const getStockFieldMeta = () => {
+    if (!editProduct?.id) {
+      return {
+        label: 'Stok Awal',
+        disabled: false,
+        description: 'Diisi untuk produk yang stoknya dikelola manual.',
+      };
+    }
+
+    if (isLinkedToRecipe) {
+      const recipeCount = getProductRecipeCount(editProduct.id);
+      return {
+        label: 'Stok Otomatis dari Resep',
+        disabled: true,
+        description: `Produk ini terhubung ke ${recipeCount} resep bahan. Stok dihitung otomatis dari stok gudang.`,
+      };
+    }
+
+    return {
+      label: 'Stok Awal',
+      disabled: false,
+      description: 'Bisa diedit karena produk ini belum terhubung ke resep bahan.',
+    };
+  };
+
+  const getProductStockRedirect = (product?: Product | null) => {
+    if (!product?.id) return null;
+
+    const linkedRecipes = (productRecipes ?? []).filter(recipe => recipe.productId === product.id);
+    if (linkedRecipes.length === 0) return null;
+
+    const linkedWarehouseItemIds = new Set(linkedRecipes.map(recipe => recipe.warehouseItemId));
+    const prepFormula = (dailyPrepFormulas ?? []).find(formula => linkedWarehouseItemIds.has(formula.targetItemId));
+
+    if (prepFormula) {
+      const prepSource = visibleWarehouseItems?.find(item => item.id === prepFormula.prepItemId);
+      return {
+        label: 'Buka Persiapan Harian',
+        description: prepSource
+          ? `Stok produk ini bertambah dari hasil persiapan ${prepSource.name}.`
+          : 'Stok produk ini bertambah dari hasil persiapan harian.',
+        go: () => {
+          setDialogOpen(false);
+          navigate(`/warehouse?tab=daily&itemId=${prepFormula.prepItemId}`);
+        },
+      };
+    }
+
+    const primaryWarehouseItem = visibleWarehouseItems?.find(item => item.id === linkedRecipes[0]?.warehouseItemId);
+    const isManualSource = primaryWarehouseItem
+      ? primaryWarehouseItem.isCashierVisible !== 1 && primaryWarehouseItem.isDailyReset !== 1
+      : false;
+    const filter = isManualSource ? 'manual' : 'all';
+
+    return {
+      label: 'Buka Stok Barang',
+      description: primaryWarehouseItem
+        ? `Cek dan ubah stok sumber di gudang: ${primaryWarehouseItem.name}.`
+        : 'Cek stok sumber produk ini di gudang.',
+      go: () => {
+        setDialogOpen(false);
+        navigate(`/warehouse?tab=stok&filter=${filter}&itemId=${linkedRecipes[0].warehouseItemId}`);
+      },
+    };
   };
 
 
@@ -328,7 +398,7 @@ export default function Produk() {
       categoryId: Number(categoryId),
       price: Number(price) || 0,
       hpp: Number(hpp) || 0,
-      stock: Number(stock) || 0,
+      stock: editProduct?.id && isLinkedToRecipe ? editProduct.stock : (Number(stock) || 0),
       unit: unit.trim() || 'pcs',
       description: description.trim() || undefined,
       barcode: barcode.trim() || undefined,
@@ -354,12 +424,34 @@ export default function Produk() {
 
   const handleDelete = async () => {
     if (deleteId) {
+      const now = new Date();
+      const relatedGroups = (productOptionGroups ?? []).filter(group => group.productId === deleteId);
+      const relatedGroupIds = relatedGroups.map(group => group.id!).filter(Boolean);
+      const relatedOptions = (productOptions ?? []).filter(option => relatedGroupIds.includes(option.groupId));
+      const relatedOptionIds = relatedOptions.map(option => option.id!).filter(Boolean);
+
       await db.products.update(deleteId, {
         isDeleted: 1,
-        deletedAt: new Date(),
+        deletedAt: now,
         updatedBy: currentUser?.id,
+        updatedAt: now,
       });
+      await db.productRecipes.where('productId').equals(deleteId).delete();
+      for (const group of relatedGroups) {
+        if (group.id) {
+          await db.productOptionGroups.update(group.id, { isDeleted: 1, updatedAt: now });
+        }
+      }
+      for (const option of relatedOptions) {
+        if (option.id) {
+          await db.productOptions.update(option.id, { isDeleted: 1, updatedAt: now });
+        }
+      }
+      for (const optionId of relatedOptionIds) {
+        await db.productOptionRecipes.where('optionId').equals(optionId).delete();
+      }
       setDeleteId(null);
+      toast.success('Produk dan konfigurasi terkait berhasil dihapus');
     }
   };
 
@@ -422,6 +514,11 @@ export default function Produk() {
           {filtered.map(p => (
             <Card key={p.id} className="border-0 shadow-sm">
               <CardContent className="p-3">
+                {(() => {
+                  const recipeCount = getProductRecipeCount(p.id);
+                  const hasRecipe = recipeCount > 0;
+
+                  return (
                 <div className="flex items-start gap-3">
                   {/* Product thumbnail */}
                   <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center shrink-0 overflow-hidden">
@@ -437,6 +534,11 @@ export default function Produk() {
                       <Badge variant="outline" className="text-[10px] shrink-0" style={{ borderColor: getCategoryColor(p.categoryId), color: getCategoryColor(p.categoryId) }}>
                         {getCategoryName(p.categoryId)}
                       </Badge>
+                      {hasRecipe && (
+                        <Badge className="text-[10px] shrink-0 bg-amber-100 text-amber-700 hover:bg-amber-100">
+                          Stok Otomatis
+                        </Badge>
+                      )}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">SKU: {p.sku || '-'}</p>
                     {p.description && (
@@ -452,6 +554,11 @@ export default function Produk() {
                       <span className={cn('text-xs font-medium px-1.5 py-0.5 rounded', p.stock <= 5 ? 'bg-destructive/10 text-destructive' : 'bg-success/10 text-success')}>
                         Stok: {p.stock} {p.unit}
                       </span>
+                      {hasRecipe && (
+                        <span className="text-[11px] text-muted-foreground">
+                          {recipeCount} bahan resep
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex flex-col gap-1">
@@ -470,6 +577,8 @@ export default function Produk() {
                     ) : null}
                   </div>
                 </div>
+                  );
+                })()}
               </CardContent>
             </Card>
           ))}
@@ -482,6 +591,11 @@ export default function Produk() {
           <DialogHeader>
             <DialogTitle>{editProduct ? 'Edit Produk' : 'Tambah Produk'}</DialogTitle>
           </DialogHeader>
+          {(() => {
+            const stockFieldMeta = getStockFieldMeta();
+            const stockRedirect = getProductStockRedirect(editProduct);
+
+            return (
           <div className="space-y-4 mt-2">
             {/* Photo picker */}
             <div className="space-y-1.5">
@@ -564,8 +678,30 @@ export default function Produk() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Stok Awal</Label>
-                <Input type="number" value={stock} onChange={e => setStock(e.target.value)} placeholder="0" className="h-11" />
+                <Label>{stockFieldMeta.label}</Label>
+                <Input
+                  type="number"
+                  value={stock}
+                  onChange={e => setStock(e.target.value)}
+                  placeholder="0"
+                  className={cn('h-11', stockFieldMeta.disabled && 'bg-muted text-muted-foreground')}
+                  disabled={stockFieldMeta.disabled}
+                />
+                <p className="text-[11px] text-muted-foreground">{stockFieldMeta.description}</p>
+                {stockRedirect && stockFieldMeta.disabled && (
+                  <div className="rounded-xl border border-primary/15 bg-primary/5 p-2.5 space-y-2">
+                    <p className="text-[11px] text-muted-foreground">{stockRedirect.description}</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={stockRedirect.go}
+                    >
+                      {stockRedirect.label}
+                    </Button>
+                  </div>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label>Satuan</Label>
@@ -599,6 +735,8 @@ export default function Produk() {
               {editProduct ? 'Simpan Perubahan' : 'Tambah Produk'}
             </Button>
           </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 

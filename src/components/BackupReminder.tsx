@@ -2,6 +2,7 @@ import { X, Download } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { db } from '@/lib/db';
+import { getBackupPayload } from '@/lib/backup';
 import { formatDistanceToNow } from 'date-fns';
 import { id } from 'date-fns/locale';
 
@@ -9,9 +10,10 @@ interface BackupReminderProps {
   lastBackupAt: Date | string | null;
   onDismiss: () => void;
   onBackup: () => void;
+  buttonLabel?: string;
 }
 
-export default function BackupReminder({ lastBackupAt, onDismiss, onBackup }: BackupReminderProps) {
+export default function BackupReminder({ lastBackupAt, onDismiss, onBackup, buttonLabel = 'Backup Sekarang' }: BackupReminderProps) {
   const timeAgo = lastBackupAt
     ? formatDistanceToNow(new Date(lastBackupAt), { addSuffix: true, locale: id })
     : null;
@@ -44,7 +46,7 @@ export default function BackupReminder({ lastBackupAt, onDismiss, onBackup }: Ba
           onClick={onBackup}
         >
           <Download className="w-3.5 h-3.5 mr-1" />
-          Backup Sekarang
+          {buttonLabel}
         </Button>
       </CardContent>
     </Card>
@@ -61,22 +63,7 @@ export function shouldShowBackupReminder(lastBackupAt: Date | string | null): bo
 
 // Export all data as JSON and trigger download
 export async function exportBackupData() {
-  const data = {
-    version: 4,
-    exportedAt: new Date().toISOString(),
-    categories: await db.categories.toArray(),
-    products: await db.products.toArray(),
-    suppliers: await db.suppliers.toArray(),
-    stockIns: await db.stockIns.toArray(),
-    stockOuts: await db.stockOuts.toArray(),
-    hppHistory: await db.hppHistory.toArray(),
-    paymentMethods: await db.paymentMethods.toArray(),
-    transactions: await db.transactions.toArray(),
-    transactionItems: await db.transactionItems.toArray(),
-    storeSettings: await db.storeSettings.toArray(),
-    users: await db.users.toArray(),
-    units: await db.units.toArray(),
-  };
+  const data = await getBackupPayload();
 
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -86,9 +73,9 @@ export async function exportBackupData() {
   a.click();
   URL.revokeObjectURL(url);
 
-  // Update last backup time
+  // Track local file export separately so it does not suppress cloud auto-backup.
   const settings = await db.storeSettings.toCollection().first();
   if (settings?.id) {
-    await db.storeSettings.update(settings.id, { lastBackupAt: new Date() });
+    await db.storeSettings.update(settings.id, { lastLocalExportAt: new Date() });
   }
 }

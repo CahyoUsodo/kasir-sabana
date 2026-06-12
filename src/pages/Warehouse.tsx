@@ -6,13 +6,13 @@ import {
   upsertProductRecipe, 
   type WarehouseItem 
 } from '@/lib/db';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { 
   Warehouse, Plus, Trash2, Edit2, ChevronLeft, ArrowRight,
   Scale, X, Layers, AlertCircle, ShoppingBag,
   Camera, Minus
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,6 +32,7 @@ import { toast } from 'sonner';
 import { compressImage } from '@/lib/image-utils';
 
 export default function WarehousePage() {
+  const [searchParams] = useSearchParams();
   const warehouseItems = useLiveQuery(() => 
     db.warehouseItems.where('isDeleted').equals(0).toArray()
   );
@@ -46,6 +47,7 @@ export default function WarehousePage() {
 
   // States
   const [activeTab, setActiveTab] = useState<'stok' | 'resep' | 'daily'>('stok');
+  const [stockFilter, setStockFilter] = useState<'all' | 'manual' | 'cashier' | 'prep' | 'output'>('all');
   
   // Item Dialog states
   const [itemDialog, setItemDialog] = useState(false);
@@ -157,6 +159,11 @@ export default function WarehousePage() {
   };
 
   const deleteItem = async (id: number) => {
+    const isPrepOutput = formulas?.some(formula => formula.targetItemId === id);
+    if (isPrepOutput) {
+      toast.error('Item output persiapan tidak bisa dihapus langsung. Hapus dulu dari rumus persiapan.');
+      return;
+    }
     if (!confirm('Apakah Anda yakin ingin menghapus barang ini dari gudang? Resep yang terhubung dengannya akan tetap ada namun tidak berfungsi.')) return;
     try {
       await db.warehouseItems.update(id, { isDeleted: 1, updatedAt: new Date() });
@@ -411,6 +418,81 @@ export default function WarehousePage() {
   const prepItemName = prepItemId ? warehouseItems?.find(wi => wi.id === prepItemId)?.name : '';
   const prepItemUnit = prepItemId ? warehouseItems?.find(wi => wi.id === prepItemId)?.unit : '';
   const prepItemFactor = prepItemId ? (warehouseItems?.find(wi => wi.id === prepItemId)?.dailyPrepFactor || 1) : 1;
+  const editingWarehouseItem = itemEditId ? warehouseItems?.find(item => item.id === itemEditId) : undefined;
+
+  const prepSourcesByTarget = activeFormulas.reduce<Record<number, WarehouseItem[]>>((acc, formula) => {
+    const sourceItem = warehouseItems?.find(item => item.id === formula.prepItemId);
+    if (!sourceItem) return acc;
+    if (!acc[formula.targetItemId]) acc[formula.targetItemId] = [];
+    acc[formula.targetItemId].push(sourceItem);
+    return acc;
+  }, {});
+
+  const getItemMeta = (item: WarehouseItem) => {
+    const isOutput = targetItemIds.has(item.id!);
+    const isPrepMain = item.isDailyReset === 1 && !isOutput;
+    const isCashierItem = item.isCashierVisible === 1;
+    const prepSources = prepSourcesByTarget[item.id!] ?? [];
+    return {
+      isOutput,
+      isPrepMain,
+      isCashierItem,
+      prepSources,
+      isManual: !isOutput && !isPrepMain && !isCashierItem,
+    };
+  };
+
+  const stockFilterOptions = [
+    { key: 'all' as const, label: 'Semua' },
+    { key: 'manual' as const, label: 'Manual' },
+    { key: 'cashier' as const, label: 'Kasir' },
+    { key: 'prep' as const, label: 'Persiapan Utama' },
+    { key: 'output' as const, label: 'Output Persiapan' },
+  ];
+
+  const filteredStockItems = (warehouseItems ?? []).filter(item => {
+    const meta = getItemMeta(item);
+    if (stockFilter === 'manual') return meta.isManual;
+    if (stockFilter === 'cashier') return meta.isCashierItem;
+    if (stockFilter === 'prep') return meta.isPrepMain;
+    if (stockFilter === 'output') return meta.isOutput;
+    return true;
+  });
+
+  useEffect(() => {
+    const queryTab = searchParams.get('tab');
+    const queryFilter = searchParams.get('filter');
+
+    if (queryTab === 'stok' || queryTab === 'resep' || queryTab === 'daily') {
+      setActiveTab(queryTab);
+    }
+
+    if (queryFilter === 'all' || queryFilter === 'manual' || queryFilter === 'cashier' || queryFilter === 'prep' || queryFilter === 'output') {
+      setStockFilter(queryFilter);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const targetId = searchParams.get('itemId');
+    if (!targetId) return;
+
+    const domId = activeTab === 'daily'
+      ? `warehouse-daily-item-${targetId}`
+      : activeTab === 'stok'
+        ? `warehouse-stock-item-${targetId}`
+        : '';
+
+    if (!domId) return;
+
+    const timeoutId = window.setTimeout(() => {
+      const targetEl = document.getElementById(domId);
+      if (targetEl) {
+        targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 150);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [searchParams, activeTab, filteredStockItems, mainPrepItems]);
 
   // Render main body
   return (
@@ -463,57 +545,102 @@ export default function WarehousePage() {
             </Button>
           </div>
 
+          <div className="space-y-2">
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              Item hasil persiapan tetap ditampilkan agar stok siap jual terlihat, tetapi dibedakan dari bahan manual biasa supaya tidak membingungkan.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {stockFilterOptions.map(option => (
+                <Button
+                  key={option.key}
+                  type="button"
+                  variant={stockFilter === option.key ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-8 rounded-full text-[11px]"
+                  onClick={() => setStockFilter(option.key)}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+
           <div className="grid gap-3 sm:grid-cols-2">
-            {warehouseItems?.map(item => (
-              <Card key={item.id} className="border-0 shadow-sm overflow-hidden">
-                <CardContent className="p-4 flex items-center justify-between">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-12 h-12 rounded-lg bg-muted border flex items-center justify-center overflow-hidden shrink-0">
-                      {item.photo ? (
-                        <img src={item.photo} alt={item.name} className="w-full h-full object-cover" />
-                      ) : (
-                        <Warehouse className="w-5 h-5 text-muted-foreground" />
-                      )}
-                    </div>
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <p className="text-sm font-semibold truncate">{item.name}</p>
-                        {item.isDailyReset === 1 && (
-                          <Badge className="text-[9px] h-4 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 border-0">Harian</Badge>
-                        )}
-                        {item.isCashierVisible === 1 && (
-                          <Badge className="text-[9px] h-4 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-0">Kasir</Badge>
+            {filteredStockItems.map(item => {
+              const meta = getItemMeta(item);
+              return (
+                <Card id={`warehouse-stock-item-${item.id}`} key={item.id} className="border-0 shadow-sm overflow-hidden">
+                  <CardContent className="p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-12 h-12 rounded-lg bg-muted border flex items-center justify-center overflow-hidden shrink-0">
+                        {item.photo ? (
+                          <img src={item.photo} alt={item.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <Warehouse className="w-5 h-5 text-muted-foreground" />
                         )}
                       </div>
-                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <span>Stok:</span>
-                        <span className="font-bold text-foreground">{item.stock} {item.unit}</span>
-                        {item.isCashierVisible === 1 && (
-                          <>
-                            <span className="mx-1">•</span>
-                            <span>Harga:</span>
-                            <span className="font-semibold text-foreground">Rp {(item.price ?? 0).toLocaleString('id-ID')}</span>
-                          </>
-                        )}
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-sm font-semibold truncate">{item.name}</p>
+                          {meta.isOutput && (
+                            <Badge className="text-[9px] h-4 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-0">Output Persiapan</Badge>
+                          )}
+                          {meta.isPrepMain && (
+                            <Badge className="text-[9px] h-4 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 border-0">Persiapan Utama</Badge>
+                          )}
+                          {meta.isCashierItem && (
+                            <Badge className="text-[9px] h-4 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-0">Kasir</Badge>
+                          )}
+                          {meta.isManual && (
+                            <Badge className="text-[9px] h-4 bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-400 border-0">Manual</Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground flex-wrap">
+                          <span>Stok:</span>
+                          <span className="font-bold text-foreground">{item.stock} {item.unit}</span>
+                          {item.isCashierVisible === 1 && (
+                            <>
+                              <span className="mx-1">•</span>
+                              <span>Harga:</span>
+                              <span className="font-semibold text-foreground">Rp {(item.price ?? 0).toLocaleString('id-ID')}</span>
+                            </>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground leading-tight">
+                          {meta.isOutput
+                            ? `Output dari: ${meta.prepSources.map(source => source.name).join(', ')}`
+                            : meta.isPrepMain
+                              ? 'Stok sumber yang diproses saat persiapan harian'
+                              : meta.isCashierItem
+                                ? 'Bisa dipilih langsung dari menu kasir'
+                                : 'Bahan stok umum/manual'}
+                        </p>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-1 shrink-0 ml-3">
-                    <Button variant="ghost" size="icon" className="w-8 h-8 text-muted-foreground hover:text-foreground" onClick={() => openItemEdit(item)}>
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="w-8 h-8 text-destructive hover:text-destructive/80" onClick={() => deleteItem(item.id!)}>
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                    <div className="flex items-center gap-1 shrink-0 ml-3">
+                      <Button variant="ghost" size="icon" className="w-8 h-8 text-muted-foreground hover:text-foreground" onClick={() => openItemEdit(item)}>
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="w-8 h-8 text-destructive hover:text-destructive/80 disabled:opacity-40"
+                        onClick={() => deleteItem(item.id!)}
+                        disabled={meta.isOutput}
+                        title={meta.isOutput ? 'Hapus item output dari rumus persiapan terlebih dahulu' : 'Hapus barang'}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
 
-            {warehouseItems?.length === 0 && (
+            {filteredStockItems.length === 0 && (
               <div className="col-span-full py-8 text-center text-xs text-muted-foreground">
-                Gudang Anda kosong. Tambahkan bahan baku baru.
+                Tidak ada item yang cocok dengan filter ini.
               </div>
             )}
           </div>
@@ -597,7 +724,7 @@ export default function WarehousePage() {
               const itemFormulas = activeFormulas.filter(f => f.prepItemId === item.id);
 
               return (
-                <Card key={item.id} className="border-0 shadow-sm overflow-hidden">
+                <Card id={`warehouse-daily-item-${item.id}`} key={item.id} className="border-0 shadow-sm overflow-hidden">
                   <CardHeader className="p-4 pb-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-3">
@@ -717,6 +844,13 @@ export default function WarehousePage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 mt-2 max-h-[75vh] overflow-y-auto pr-1">
+            {editingWarehouseItem && getItemMeta(editingWarehouseItem).isOutput && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-800">
+                Item ini adalah <strong>output persiapan</strong> dari {getItemMeta(editingWarehouseItem).prepSources.map(source => source.name).join(', ')}.
+                Stoknya normalnya bertambah dari menu <strong>Persiapan Harian</strong>.
+              </div>
+            )}
+
             {/* Foto Barang */}
             <div className="flex flex-col items-center gap-2 pb-2">
               <Label className="text-xs font-semibold self-start">Foto Barang</Label>

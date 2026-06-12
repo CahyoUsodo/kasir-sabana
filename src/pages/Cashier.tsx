@@ -1,9 +1,9 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Product, type Category, type Transaction, type TransactionItemRecord, type CartOptionSnapshot, adjustConfiguredStock, autoLinkChickenRecipes, buildStockKey, getAvailableStockForSelection } from '@/lib/db';
+import { db, type Product, type Category, type Transaction, type TransactionItemRecord, type CartOptionSnapshot, adjustConfiguredStock, buildStockKey, getAvailableStockForSelection } from '@/lib/db';
 import { useState, useRef, useEffect } from 'react';
-import { Search, Plus, Minus, ShoppingCart, X, Percent, Tag, CreditCard, Banknote, Check, Package as PackageIcon, ClipboardList, Save, Pencil, User, Hash, Trash2, Utensils, ShoppingBag } from 'lucide-react';
+import { Search, Plus, Minus, ShoppingCart, X, Percent, Tag, CreditCard, Banknote, Check, Package as PackageIcon, Pencil, User, Hash, Utensils, ShoppingBag } from 'lucide-react';
 import Receipt from '@/components/Receipt';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,11 +12,8 @@ import { Badge } from '@/components/ui/badge';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { format } from 'date-fns';
-import { id as localeId } from 'date-fns/locale';
 import { useAuth } from '@/hooks/use-auth';
 import LockedPage from '@/components/LockedPage';
 
@@ -34,7 +31,6 @@ interface CartItem {
 export default function Kasir() {
   const { currentUser, can } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const navigate = useNavigate();
   const editTxIdParam = searchParams.get('editTxId');
 
   const [search, setSearch] = useState('');
@@ -67,14 +63,11 @@ export default function Kasir() {
   const [tableNumber, setTableNumber] = useState('');
   const [remarks, setRemarks] = useState('');
 
-  const [openBillsOpen, setOpenBillsOpen] = useState(false);
   const [editingItemNotes, setEditingItemNotes] = useState<string | null>(null);
   const [tempItemNotes, setTempItemNotes] = useState('');
-  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
-  const [cancelTargetTx, setCancelTargetTx] = useState<Transaction | null>(null);
 
   const [prepModalOpen, setPrepModalOpen] = useState(false);
-  const [prepCount, setPrepCount] = useState('1');
+  const [prepCounts, setPrepCounts] = useState<Record<number, string>>({});
   const [optionProduct, setOptionProduct] = useState<Product | null>(null);
   const [selectedOptionIds, setSelectedOptionIds] = useState<Record<number, number[]>>({});
 
@@ -85,7 +78,6 @@ export default function Kasir() {
   const dailyPrepFormulas = useLiveQuery(() => db.dailyPrepFormulas.toArray());
   const paymentMethods = useLiveQuery(() => db.paymentMethods.toArray());
   const storeSettings = useLiveQuery(() => db.storeSettings.toCollection().first());
-  const openBills = useLiveQuery(() => db.transactions.where('status').equals('open').reverse().sortBy('date'));
   const allUsers = useLiveQuery(() => db.users.toArray());
   const productRecipes = useLiveQuery(() => db.productRecipes.toArray());
   const productOptionGroups = useLiveQuery(() => db.productOptionGroups.toArray());
@@ -261,10 +253,6 @@ export default function Kasir() {
   };
 
   useEffect(() => {
-    autoLinkChickenRecipes();
-  }, []);
-
-  useEffect(() => {
     if (editTxIdParam) {
       const txId = Number(editTxIdParam);
       if (!isNaN(txId) && txId !== editingTxId) {
@@ -278,7 +266,13 @@ export default function Kasir() {
   }, [editTxIdParam]);
 
   const todayStr = new Date().toLocaleDateString('en-CA');
-  const needsPrep = chickenItems && chickenItems.length > 0 && chickenItems.some(item => item.lastPreparedDate !== todayStr);
+  const activeDailyPrepFormulas = (dailyPrepFormulas ?? []).filter(formula =>
+    visibleWarehouseItems?.some(item => item.id === formula.prepItemId) &&
+    visibleWarehouseItems?.some(item => item.id === formula.targetItemId)
+  );
+  const prepTargetItemIds = new Set(activeDailyPrepFormulas.map(formula => formula.targetItemId));
+  const mainPrepItems = (chickenItems ?? []).filter(item => !prepTargetItemIds.has(item.id!));
+  const needsPrep = mainPrepItems.length > 0 && mainPrepItems.some(item => item.lastPreparedDate !== todayStr);
 
   useEffect(() => {
     if (needsPrep) {
@@ -288,90 +282,112 @@ export default function Kasir() {
     }
   }, [needsPrep]);
 
+  useEffect(() => {
+    if (!prepModalOpen || mainPrepItems.length === 0) return;
+
+    setPrepCounts(prev => {
+      const next: Record<number, string> = {};
+      for (const item of mainPrepItems) {
+        const currentPrep = item.lastPreparedDate === todayStr ? (item.dailyPrepQty || 0) : 0;
+        next[item.id!] = prev[item.id!] ?? (currentPrep > 0 ? String(currentPrep) : '');
+      }
+      return next;
+    });
+  }, [prepModalOpen, mainPrepItems, todayStr]);
+
+  const applyDailyPrepDelta = async (prepItemId: number, delta: number) => {
+    const prepItem = await db.warehouseItems.get(prepItemId);
+    if (!prepItem) return;
+
+    const isNewDay = prepItem.lastPreparedDate !== todayStr;
+    const currentPrep = isNewDay ? 0 : (prepItem.dailyPrepQty || 0);
+    const newPrep = currentPrep + delta;
+
+    if (newPrep < 0) {
+      throw new Error(`Jumlah persiapan ${prepItem.name} tidak bisa kurang dari 0`);
+    }
+
+    const itemFormulas = activeDailyPrepFormulas.filter(formula => formula.prepItemId === prepItemId);
+    if (itemFormulas.length > 0) {
+      const newPrepItemStock = Math.max(0, prepItem.stock - delta);
+      await db.warehouseItems.update(prepItemId, {
+        stock: newPrepItemStock,
+        dailyPrepQty: newPrep,
+        lastPreparedDate: todayStr,
+        updatedAt: new Date()
+      });
+
+      for (const formula of itemFormulas) {
+        const targetItem = await db.warehouseItems.get(formula.targetItemId);
+        if (!targetItem) continue;
+
+        const isTargetNewDay = targetItem.lastPreparedDate !== todayStr;
+        let newTargetStock = targetItem.stock + (delta * formula.factor);
+        let newTargetPrepQty = (targetItem.dailyPrepQty || 0) + (delta * formula.factor);
+
+        if (isTargetNewDay) {
+          newTargetStock = newPrep * formula.factor;
+          newTargetPrepQty = newPrep * formula.factor;
+        } else {
+          newTargetStock = Math.max(0, newTargetStock);
+          newTargetPrepQty = Math.max(0, newTargetPrepQty);
+        }
+
+        await db.warehouseItems.update(targetItem.id!, {
+          stock: newTargetStock,
+          dailyPrepQty: newTargetPrepQty,
+          lastPreparedDate: todayStr,
+          updatedAt: new Date()
+        });
+      }
+      return;
+    }
+
+    const factor = prepItem.dailyPrepFactor || 1;
+    const newStock = isNewDay
+      ? Math.max(0, newPrep * factor)
+      : Math.max(0, prepItem.stock + (delta * factor));
+
+    await db.warehouseItems.update(prepItemId, {
+      stock: newStock,
+      dailyPrepQty: newPrep,
+      lastPreparedDate: todayStr,
+      updatedAt: new Date()
+    });
+  };
+
   const handleDailyPrep = async () => {
-    const counts = parseInt(prepCount) || 0;
-    if (counts <= 0) {
-      toast.error('Jumlah persiapan harus lebih dari 0');
+    const prepEntries = mainPrepItems.map(item => ({
+      item,
+      desiredQty: Math.max(0, parseInt(prepCounts[item.id!] || '0') || 0)
+    }));
+
+    if (prepEntries.every(entry => entry.desiredQty === 0)) {
+      toast.error('Isi minimal satu jumlah persiapan harian');
       return;
     }
 
     try {
-      // Find the main prep item (e.g. Ayam Potong 9)
-      const ayamPotongItem = await db.warehouseItems
-        .where('name')
-        .equalsIgnoreCase('Ayam Potong 9')
-        .first();
+      for (const { item, desiredQty } of prepEntries) {
+        const currentPrep = item.lastPreparedDate === todayStr ? (item.dailyPrepQty || 0) : 0;
+        const delta = desiredQty - currentPrep;
 
-      if (ayamPotongItem) {
-        const prepItemId = ayamPotongItem.id!;
-        const formulas = await db.dailyPrepFormulas.where('prepItemId').equals(prepItemId).toArray();
-        
-        // Decrement Ayam Potong 9 stock by counts (or keep at 0 if no stock tracked)
-        const newAyamStock = Math.max(0, ayamPotongItem.stock - counts);
-        await db.warehouseItems.update(prepItemId, {
-          stock: newAyamStock,
-          dailyPrepQty: counts,
-          lastPreparedDate: todayStr,
-          updatedAt: new Date()
-        });
-
-        // Add target items
-        for (const formula of formulas) {
-          const targetItem = await db.warehouseItems.get(formula.targetItemId);
-          if (targetItem) {
-            const addQty = formula.factor * counts;
-            await db.warehouseItems.update(targetItem.id!, {
-              stock: addQty,
-              dailyPrepQty: addQty,
-              lastPreparedDate: todayStr,
-              updatedAt: new Date()
-            });
-          }
-        }
-        toast.success(`Berhasil memproses persiapan ${counts} ekor Ayam Potong 9 untuk hari ini!`);
-      } else {
-        // Fallback to old behavior if Ayam Potong 9 doesn't exist
-        const oldFormulas = [
-          { name: 'Paha Bawah', factor: 2 },
-          { name: 'Paha Atas', factor: 2 },
-          { name: 'Sayap', factor: 2 },
-          { name: 'Dada', factor: 3 }
-        ];
-        for (const formula of oldFormulas) {
-          const item = await db.warehouseItems
-            .where('name')
-            .equalsIgnoreCase(formula.name)
-            .first();
-          if (item) {
-            const addQty = formula.factor * counts;
-            await db.warehouseItems.update(item.id!, {
-              stock: addQty,
-              dailyPrepQty: addQty,
-              lastPreparedDate: todayStr,
-              updatedAt: new Date()
-            });
-          }
-        }
-        toast.success(`Berhasil memproses persiapan ${counts} ekor Ayam Potong 9 untuk hari ini!`);
-      }
-
-      // Mark other daily reset items (e.g. Es Batu) as prepared to avoid infinite popups
-      const allDailyItems = await db.warehouseItems.where('isDailyReset').equals(1).toArray();
-      const targetItemIds = new Set((await db.dailyPrepFormulas.toArray()).map(f => f.targetItemId));
-      for (const item of allDailyItems) {
-        if (item.id !== ayamPotongItem?.id && !targetItemIds.has(item.id!) && item.lastPreparedDate !== todayStr) {
+        if (delta !== 0) {
+          await applyDailyPrepDelta(item.id!, delta);
+        } else if (item.lastPreparedDate !== todayStr) {
           await db.warehouseItems.update(item.id!, {
+            dailyPrepQty: desiredQty,
             lastPreparedDate: todayStr,
-            dailyPrepQty: 0,
             updatedAt: new Date()
           });
         }
       }
 
+      toast.success('Persiapan harian berhasil diproses');
       setPrepModalOpen(false);
     } catch (err) {
       console.error(err);
-      toast.error('Gagal memproses persiapan harian');
+      toast.error(err instanceof Error ? err.message : 'Gagal memproses persiapan harian');
     }
   };
 
@@ -622,241 +638,6 @@ export default function Kasir() {
   const totalItemDiscount = cart.reduce((sum, item) => sum + getItemDiscountAmount(item), 0);
   const totalProfit = cart.reduce((sum, item) => sum + (item.product.price - item.product.hpp) * item.qty, 0) - totalItemDiscount - txDiscountAmount;
 
-  // === Open Bill Operations ===
-
-  const saveOpenBill = async () => {
-    if (cart.length === 0) { toast.error('Keranjang kosong'); return; }
-
-    const now = new Date();
-
-    if (editingTxId) {
-      // Update existing open bill
-      const oldItems = await db.transactionItems.where('transactionId').equals(editingTxId).toArray();
-
-      await db.transactions.update(editingTxId, {
-        subtotal,
-        discountType: txDiscountType,
-        discountValue: Number(txDiscountValue) || 0,
-        discountAmount: txDiscountAmount,
-        total,
-        customerName: customerName.trim() || undefined,
-        tableNumber: serviceType === 'take_away' ? undefined : (tableNumber.trim() || undefined),
-        remarks: remarks.trim() || undefined,
-        date: now,
-        serviceType,
-      });
-      await db.transactionItems.where('transactionId').equals(editingTxId).delete();
-      const itemRecords: TransactionItemRecord[] = cart.map(c => ({
-        transactionId: editingTxId,
-        productId: c.product.id!,
-        productName: c.product.name,
-        productBaseName: c.baseName,
-        selectedOptions: c.selectedOptions,
-        stockKey: c.stockKey,
-        quantity: c.qty,
-        price: c.product.price,
-        hpp: c.product.hpp,
-        discountType: c.discountType,
-        discountValue: c.discountValue,
-        discountAmount: getItemDiscountAmount(c),
-        subtotal: getItemSubtotal(c),
-        notes: c.notes,
-      }));
-      await db.transactionItems.bulkAdd(itemRecords);
-
-      // Adjust stock deltas safely by fetching fresh database stock
-      for (const cartItem of cart) {
-        const oldItem = oldItems.find(oi => (oi.stockKey || buildStockKey(oi.productId, oi.selectedOptions?.map(option => option.optionId) ?? [])) === cartItem.stockKey);
-        const oldQty = oldItem?.quantity ?? 0;
-        const newQty = cartItem.qty;
-        const delta = newQty - oldQty;
-        if (delta !== 0) {
-          await applyStockDelta(cartItem.product.id!, delta, cartItem.selectedOptions);
-        }
-      }
-      // Restore stock for removed items that were in old bill
-      for (const oldItem of oldItems) {
-        const oldStockKey = oldItem.stockKey || buildStockKey(oldItem.productId, oldItem.selectedOptions?.map(option => option.optionId) ?? []);
-        const stillInCart = cart.find(c => c.stockKey === oldStockKey);
-        if (!stillInCart) {
-          await applyStockDelta(oldItem.productId, -oldItem.quantity, oldItem.selectedOptions ?? []);
-        }
-      }
-
-      const updatedTx = await db.transactions.get(editingTxId);
-      toast.success(`Bill ${updatedTx?.receiptNumber} diperbarui!`);
-    } else {
-      const receiptNumber = `TX${Date.now()}`;
-
-      const txData: Transaction = {
-        subtotal,
-        discountType: txDiscountType,
-        discountValue: Number(txDiscountValue) || 0,
-        discountAmount: txDiscountAmount,
-        total,
-        paymentMethodId: 0,
-        paymentAmount: 0,
-        change: 0,
-        profit: 0,
-        date: now,
-        receiptNumber,
-        status: 'open',
-        customerName: customerName.trim() || undefined,
-        tableNumber: serviceType === 'take_away' ? undefined : (tableNumber.trim() || undefined),
-        remarks: remarks.trim() || undefined,
-        openedAt: now,
-        createdBy: currentUser?.id,
-        serviceType,
-      };
-
-      const txId = await db.transactions.add(txData);
-
-      const itemRecords: TransactionItemRecord[] = cart.map(c => ({
-        transactionId: txId as number,
-        productId: c.product.id!,
-        productName: c.product.name,
-        productBaseName: c.baseName,
-        selectedOptions: c.selectedOptions,
-        stockKey: c.stockKey,
-        quantity: c.qty,
-        price: c.product.price,
-        hpp: c.product.hpp,
-        discountType: c.discountType,
-        discountValue: c.discountValue,
-        discountAmount: getItemDiscountAmount(c),
-        subtotal: getItemSubtotal(c),
-        notes: c.notes,
-      }));
-      await db.transactionItems.bulkAdd(itemRecords);
-
-      for (const item of cart) {
-        await applyStockDelta(item.product.id!, item.qty, item.selectedOptions);
-      }
-
-      toast.success(`Bill ${receiptNumber} disimpan!`);
-    }
-
-    doFullReset();
-    setCartOpen(false);
-  };
-
-  const loadOpenBill = async (tx: Transaction) => {
-    if (!tx.id) return;
-    try {
-      const items = await db.transactionItems.where('transactionId').equals(tx.id).toArray();
-      const allProducts = await db.products.toArray();
-
-      const cartItems: CartItem[] = [];
-      const qtyMap: Record<string, number> = {};
-
-      for (const item of items) {
-        let product = allProducts.find(p => p.id === item.productId);
-        if (!product && item.productId < 0) {
-          const whId = Math.abs(item.productId);
-          const whItem = await db.warehouseItems.get(whId);
-          if (whItem) {
-            product = {
-              id: item.productId,
-              name: whItem.name,
-              sku: `WH-${whItem.id}`,
-              categoryId: -99,
-              price: item.price,
-              hpp: item.hpp,
-              stock: whItem.stock,
-              unit: whItem.unit,
-              createdAt: whItem.createdAt,
-              updatedAt: whItem.updatedAt,
-              isDeleted: whItem.isDeleted,
-              deletedAt: null
-            };
-          }
-        }
-        if (!product) {
-          product = {
-            id: item.productId,
-            name: item.productName,
-            sku: '',
-            categoryId: 0,
-            price: item.price,
-            hpp: item.hpp,
-            stock: 0,
-            unit: 'pcs',
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            isDeleted: 1,
-            deletedAt: new Date()
-          };
-        }
-        const selectedOptions = item.selectedOptions ?? [];
-        const stockKey = item.stockKey || buildStockKey(item.productId, selectedOptions.map(option => option.optionId));
-        const configuredProduct = {
-          ...product,
-          name: item.productName,
-          price: item.price,
-          hpp: item.hpp,
-        };
-        cartItems.push({
-          product: configuredProduct,
-          stockKey,
-          baseName: item.productBaseName || product.name,
-          selectedOptions,
-          qty: item.quantity,
-          discountType: item.discountType as 'percentage' | 'nominal' | null,
-          discountValue: item.discountValue,
-          notes: item.notes,
-        });
-        qtyMap[stockKey] = item.quantity;
-      }
-
-      setCart(cartItems);
-      setEditingTxId(tx.id);
-      setOriginalTx(tx);
-      setOriginalItems(items);
-      setOriginalQuantities(qtyMap);
-      setTxDiscountType(tx.discountType);
-      setTxDiscountValue(tx.discountType ? String(tx.discountValue) : '');
-      setCustomerName(tx.customerName || '');
-      setTableNumber(tx.tableNumber || '');
-      setRemarks(tx.remarks || '');
-      setServiceType(tx.serviceType || 'dine_in');
-      setOpenBillsOpen(false);
-      setCartOpen(true);
-    } catch (err) {
-      console.error(err);
-      toast.error('Gagal memuat open bill');
-    }
-  };
-
-  const cancelOpenBill = async (tx: Transaction) => {
-    if (!tx.id) return;
-    const items = await db.transactionItems.where('transactionId').equals(tx.id).toArray();
-    for (const item of items) {
-      await applyStockDelta(item.productId, -item.quantity, item.selectedOptions ?? []);
-    }
-    await db.transactionItems.where('transactionId').equals(tx.id).delete();
-    await db.transactions.delete(tx.id);
-    toast.success(`Bill ${tx.receiptNumber} dibatalkan`);
-    setCancelDialogOpen(false);
-    setCancelTargetTx(null);
-    if (editingTxId === tx.id) {
-      doFullReset();
-      setCartOpen(false);
-    }
-  };
-
-  const handleCancelFromCart = () => {
-    const tx = openBills?.find(b => b.id === editingTxId);
-    if (tx) {
-      setCancelTargetTx(tx);
-      setCancelDialogOpen(true);
-    }
-  };
-
-  const handleCancelFromList = (bill: Transaction) => {
-    setCancelTargetTx(bill);
-    setCancelDialogOpen(true);
-  };
-
   // === Checkout ===
 
   const handleCheckout = async () => {
@@ -985,10 +766,6 @@ export default function Kasir() {
   };
 
   const cartCount = cart.reduce((s, c) => s + c.qty, 0);
-  const openBillsCount = openBills?.length ?? 0;
-
-
-
   const rp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
 
   // After all hooks: if user can't create transactions, render the locked
@@ -1008,24 +785,10 @@ export default function Kasir() {
           Kasir
           {editingTxId && (
             <Badge variant="secondary" className="text-[10px] font-normal">
-              Editing Bill
+              Editing Transaksi
             </Badge>
           )}
         </h1>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-9 gap-1.5 text-xs relative"
-          onClick={() => setOpenBillsOpen(true)}
-        >
-          <ClipboardList className="w-4 h-4" />
-          Open Bill
-          {openBillsCount > 0 && (
-            <Badge className="absolute -top-1 -right-1 h-4 min-w-4 text-[9px] px-1 bg-destructive text-destructive-foreground">
-              {openBillsCount}
-            </Badge>
-          )}
-        </Button>
       </div>
 
       {/* Edit Notice Banner */}
@@ -1034,7 +797,7 @@ export default function Kasir() {
           <div className="flex items-center gap-2">
             <Pencil className="w-3.5 h-3.5 shrink-0" />
             <span>
-              Mengedit Transaksi <strong>#{originalTx?.receiptNumber}</strong> {originalTx?.status === 'completed' ? '(Lunas)' : '(Open Bill)'}
+              Mengedit Transaksi <strong>#{originalTx?.receiptNumber}</strong>
             </span>
           </div>
           <Button
@@ -1303,33 +1066,13 @@ export default function Kasir() {
 
               <div className="flex gap-2">
                 <Button
-                  variant="outline"
-                  className="flex-1 h-12 text-sm font-semibold"
-                  onClick={saveOpenBill}
-                  disabled={cart.length === 0 || originalTx?.status === 'completed'}
-                >
-                  <Save className="w-4 h-4 mr-2" />
-                  Simpan Bill
-                </Button>
-                <Button
-                  className="flex-1 h-12 text-sm font-semibold"
+                  className="w-full h-12 text-sm font-semibold"
                   onClick={() => { setCheckoutOpen(true); setPaymentMethodId(paymentMethods?.[0]?.id?.toString() ?? ''); setPaymentAmount(total.toString()); setIsQuickAdding(false); }}
                 >
                   <CreditCard className="w-4 h-4 mr-2" />
                   Bayar
                 </Button>
               </div>
-
-              {editingTxId && originalTx?.status === 'open' && can('delete_transaction') && (
-                <Button
-                  variant="outline"
-                  className="w-full h-10 text-xs text-destructive border-destructive/30 hover:bg-destructive/5"
-                  onClick={handleCancelFromCart}
-                >
-                  <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-                  Batalkan Bill Ini
-                </Button>
-              )}
             </div>
           </div>
         )}
@@ -1353,10 +1096,7 @@ export default function Kasir() {
       <Sheet open={cartOpen} onOpenChange={(open) => { setCartOpen(open); if (!open) setEditingItemNotes(null); }}>
         <SheetContent side="bottom" className="h-[85vh] rounded-t-2xl max-w-lg mx-auto">
           <SheetHeader>
-            <SheetTitle className="text-left">
-              Keranjang ({cartCount} item)
-              {editingTxId && <span className="text-xs font-normal text-muted-foreground ml-2">— edit open bill</span>}
-            </SheetTitle>
+            <SheetTitle className="text-left">Keranjang ({cartCount} item)</SheetTitle>
           </SheetHeader>
           <div className="flex flex-col h-full mt-4">
             <div className="flex-1 overflow-y-auto space-y-3 pb-4">
@@ -1539,94 +1279,19 @@ export default function Kasir() {
               {/* Action buttons */}
               <div className="flex gap-2">
                 <Button
-                  variant="outline"
-                  className="flex-1 h-12 text-sm font-semibold"
-                  onClick={saveOpenBill}
-                  disabled={cart.length === 0 || originalTx?.status === 'completed'}
-                >
-                  <Save className="w-4 h-4 mr-2" />
-                  Simpan Bill
-                </Button>
-                <Button
-                  className="flex-1 h-12 text-sm font-semibold"
+                  className="w-full h-12 text-sm font-semibold"
                   onClick={() => { setCheckoutOpen(true); setPaymentMethodId(paymentMethods?.[0]?.id?.toString() ?? ''); setPaymentAmount(total.toString()); setIsQuickAdding(false); }}
                 >
                   <CreditCard className="w-4 h-4 mr-2" />
                   Bayar
                 </Button>
               </div>
-
-              {editingTxId && originalTx?.status === 'open' && can('delete_transaction') && (
-                <Button
-                  variant="outline"
-                  className="w-full h-10 text-xs text-destructive border-destructive/30 hover:bg-destructive/5"
-                  onClick={handleCancelFromCart}
-                >
-                  <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-                  Batalkan Bill Ini
-                </Button>
-              )}
             </div>
           </div>
         </SheetContent>
       </Sheet>
       </div>{/* end mobile cart wrapper */}
 
-      {/* Open Bills Sheet */}
-      <Sheet open={openBillsOpen} onOpenChange={setOpenBillsOpen}>
-        <SheetContent side="bottom" className="h-[80vh] rounded-t-2xl max-w-lg md:max-w-xl mx-auto">
-          <SheetHeader>
-            <SheetTitle className="text-left flex items-center gap-2">
-              <ClipboardList className="w-4 h-4 text-primary" />
-              Open Bills ({openBillsCount})
-            </SheetTitle>
-          </SheetHeader>
-          <div className="mt-4 overflow-y-auto pb-6 space-y-2">
-            {!openBills || openBills.length === 0 ? (
-              <div className="text-center py-12">
-                <ClipboardList className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
-                <p className="text-sm text-muted-foreground">Tidak ada open bill</p>
-              </div>
-            ) : (
-              openBills.map(bill => (
-                <Card key={bill.id} className="border-0 shadow-sm">
-                  <CardContent className="p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary" className="text-[10px]">{bill.receiptNumber}</Badge>
-                        <span className="text-[10px] text-muted-foreground">
-                          {bill.openedAt ? format(new Date(bill.openedAt), 'dd/MM HH:mm', { locale: localeId }) : ''}
-                        </span>
-                      </div>
-                      <span className="text-sm font-bold text-primary">{rp(bill.total)}</span>
-                    </div>
-                    <div className="flex gap-1.5 text-[10px] text-muted-foreground mb-2">
-                      {bill.customerName && <span>👤 {bill.customerName}</span>}
-                      {bill.tableNumber && <span>🪑 Meja {bill.tableNumber}</span>}
-                      {bill.remarks && <span className="truncate max-w-[120px]">📝 {bill.remarks}</span>}
-                    </div>
-                    <div className="flex gap-2">
-                      <Button size="sm" className="h-8 text-xs flex-1" onClick={() => loadOpenBill(bill)}>
-                        Lanjutkan
-                      </Button>
-                      {can('delete_transaction') && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-8 text-xs text-destructive border-destructive/30"
-                          onClick={() => handleCancelFromList(bill)}
-                        >
-                          Batal
-                        </Button>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
 
       {/* Product Options Dialog */}
       <Dialog open={!!optionProduct} onOpenChange={(open) => { if (!open) { setOptionProduct(null); setSelectedOptionIds({}); } }}>
@@ -2015,74 +1680,75 @@ export default function Kasir() {
       )}
 
 
-      {/* Cancel Open Bill Confirmation */}
-      <AlertDialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
-        <AlertDialogContent className="max-w-[90vw] rounded-xl">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Batalkan Bill?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Bill ini akan dihapus dan stok produk akan dikembalikan.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setCancelTargetTx(null)}>Tidak</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => cancelTargetTx && cancelOpenBill(cancelTargetTx)}
-            >
-              Batalkan Bill
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Daily Chicken Prep Dialog */}
+      {/* Daily Prep Dialog */}
       <Dialog open={prepModalOpen} onOpenChange={() => {}}>
         <DialogContent className="max-w-[95vw] rounded-xl [&>button]:hidden" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
           <DialogHeader>
-            <DialogTitle>Persiapan Ayam Hari Ini</DialogTitle>
+            <DialogTitle>Persiapan Harian Hari Ini</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-2">
             <p className="text-sm text-muted-foreground">
-              SOP Sabana: Stok ayam potong 9 diset ulang setiap hari baru. Masukkan jumlah Ayam Potong 9 yang dipersiapkan hari ini:
+              Masukkan jumlah untuk setiap bahan persiapan utama. Item turunan akan dihitung otomatis sesuai rumus yang sudah diset.
             </p>
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-muted-foreground">Jumlah Ayam (Ekor)</label>
-              <Input
-                type="number"
-                min="1"
-                value={prepCount}
-                onChange={e => setPrepCount(e.target.value)}
-                placeholder="Contoh: 10"
-                className="h-12 text-lg font-bold text-center"
-              />
-            </div>
-            <div className="text-xs bg-muted p-3 rounded-lg space-y-1">
-              <p className="font-semibold">Estimasi potongan yang dihasilkan:</p>
-              <ul className="list-disc pl-4 space-y-0.5">
-                {(() => {
-                  const ayamPotongItem = visibleWarehouseItems?.find(wi => wi.name.toLowerCase() === 'ayam potong 9');
-                  const formulas = dailyPrepFormulas?.filter(f => f.prepItemId === ayamPotongItem?.id) || [];
-                  if (formulas.length === 0) {
-                    return (
-                      <>
-                        <li>Paha Bawah: {(parseInt(prepCount) || 0) * 2} pcs</li>
-                        <li>Paha Atas: {(parseInt(prepCount) || 0) * 2} pcs</li>
-                        <li>Sayap: {(parseInt(prepCount) || 0) * 2} pcs</li>
-                        <li>Dada: {(parseInt(prepCount) || 0) * 3} pcs</li>
-                      </>
-                    );
-                  }
-                  return formulas.map(f => {
-                    const targetItem = visibleWarehouseItems?.find(wi => wi.id === f.targetItemId);
-                    return (
-                      <li key={f.id}>
-                        {targetItem?.name || `Bahan #${f.targetItemId}`}: {(parseInt(prepCount) || 0) * f.factor} {targetItem?.unit || 'pcs'}
-                      </li>
-                    );
-                  });
-                })()}
-              </ul>
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+              {mainPrepItems.map(item => {
+                const desiredQty = Math.max(0, parseInt(prepCounts[item.id!] || '0') || 0);
+                const currentPrep = item.lastPreparedDate === todayStr ? (item.dailyPrepQty || 0) : 0;
+                const itemFormulas = activeDailyPrepFormulas.filter(formula => formula.prepItemId === item.id);
+
+                return (
+                  <div key={item.id} className="rounded-xl border bg-card p-3 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-foreground">{item.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Stok saat ini: {item.stock} {item.unit}
+                          {currentPrep > 0 ? ` • Sudah dipersiapkan ${currentPrep} ${item.unit}` : ''}
+                        </p>
+                      </div>
+                      <Badge variant="secondary" className="rounded-full">
+                        {itemFormulas.length > 0 ? 'Punya Rumus' : 'Stok Langsung'}
+                      </Badge>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-muted-foreground">
+                        Jumlah disiapkan ({item.unit})
+                      </label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={prepCounts[item.id!] ?? ''}
+                        onChange={e => setPrepCounts(prev => ({ ...prev, [item.id!]: e.target.value }))}
+                        placeholder={`Contoh: ${item.dailyPrepFactor || 1}`}
+                        className="h-11 text-base font-semibold text-center"
+                      />
+                    </div>
+
+                    <div className="text-xs bg-muted p-3 rounded-lg space-y-1">
+                      <p className="font-semibold">
+                        {itemFormulas.length > 0 ? 'Estimasi output persiapan:' : 'Estimasi stok siap jual:'}
+                      </p>
+                      {itemFormulas.length > 0 ? (
+                        <ul className="list-disc pl-4 space-y-0.5">
+                          {itemFormulas.map(formula => {
+                            const targetItem = visibleWarehouseItems?.find(wi => wi.id === formula.targetItemId);
+                            return (
+                              <li key={formula.id}>
+                                {targetItem?.name || `Bahan #${formula.targetItemId}`}: {desiredQty * formula.factor} {targetItem?.unit || 'pcs'}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : (
+                        <p>
+                          {item.name}: {desiredQty * (item.dailyPrepFactor || 1)} {item.unit}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
             <Button className="w-full h-12 text-base font-semibold" onClick={handleDailyPrep}>
               <Check className="w-5 h-5 mr-2" />

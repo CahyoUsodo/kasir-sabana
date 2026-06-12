@@ -178,6 +178,8 @@ export interface StoreSettings {
   receiptFooter: string;
   onboardingDone: boolean;
   lastBackupAt: Date | null;
+  lastCloudBackupAt?: Date | null;
+  lastLocalExportAt?: Date | null;
   themeColor?: string; // HSL hue string e.g. "25" for orange
   logo?: string; // base64 JPEG compressed via compressImage()
   deviceId: string;
@@ -838,6 +840,75 @@ export async function adjustConfiguredStock(productId: number, qtyDelta: number,
         stock: Math.max(0, item.stock - (quantity * qtyDelta)),
         updatedAt: new Date()
       });
+    }
+  }
+}
+
+export async function repairInventoryAnomalies() {
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  const products = await db.products.where('isDeleted').equals(0).toArray();
+  const warehouseItems = await db.warehouseItems.where('isDeleted').equals(0).toArray();
+  const recipes = await db.productRecipes.toArray();
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+  for (const item of warehouseItems) {
+    if (item.stock < 0) {
+      await db.warehouseItems.update(item.id!, {
+        stock: 0,
+        updatedAt: new Date()
+      });
+    }
+  }
+
+  const refreshedWarehouseItems = await db.warehouseItems.where('isDeleted').equals(0).toArray();
+  const visibleWarehouseItems = refreshedWarehouseItems.filter(item => item.isCashierVisible === 1);
+
+  for (const product of products) {
+    const productRecipes = recipes.filter(recipe => recipe.productId === product.id);
+    if (productRecipes.length > 0) {
+      let minStock = Infinity;
+      for (const recipe of productRecipes) {
+        const warehouseItem = refreshedWarehouseItems.find(item => item.id === recipe.warehouseItemId);
+        if (!warehouseItem) {
+          minStock = 0;
+          break;
+        }
+        const isResetToday = warehouseItem.isDailyReset === 1 && warehouseItem.lastPreparedDate !== todayStr;
+        const effectiveStock = isResetToday ? 0 : Math.max(0, warehouseItem.stock);
+        const available = Math.floor(effectiveStock / recipe.quantity);
+        if (available < minStock) {
+          minStock = available;
+        }
+      }
+
+      const computedStock = minStock === Infinity ? 0 : Math.max(0, minStock);
+      if (product.stock !== computedStock) {
+        await db.products.update(product.id!, {
+          stock: computedStock,
+          updatedAt: new Date()
+        });
+      }
+      continue;
+    }
+
+    if (product.stock < 0) {
+      const productName = normalize(product.name);
+      const matchedWarehouseItem = visibleWarehouseItems.find(item => {
+        const itemName = normalize(item.name);
+        return itemName === productName || itemName.includes(productName) || productName.includes(itemName);
+      });
+
+      if (matchedWarehouseItem) {
+        await db.products.update(product.id!, {
+          stock: Math.max(0, matchedWarehouseItem.stock),
+          updatedAt: new Date()
+        });
+      } else {
+        await db.products.update(product.id!, {
+          stock: 0,
+          updatedAt: new Date()
+        });
+      }
     }
   }
 }
