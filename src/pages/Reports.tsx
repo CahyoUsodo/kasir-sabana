@@ -47,6 +47,9 @@ export default function Laporan() {
     return db.transactionItems.where('transactionId').anyOf(txIds).toArray();
   }, [transactions]);
 
+  const warehouseItems = useLiveQuery(() => db.warehouseItems.where('isDeleted').equals(0).toArray());
+  const productRecipes = useLiveQuery(() => db.productRecipes.toArray());
+
   // Permission gate after all hooks have been called.
   if (!can('view_reports')) {
     return <LockedPage title="Laporan" permissionLabel="Lihat Laporan & Profit" />;
@@ -721,6 +724,46 @@ export default function Laporan() {
     saveAs(blob, fileName);
   };
 
+  const stockReport = (() => {
+    if (!warehouseItems) return [];
+    
+    // Map of warehouseItemId -> used qty
+    const usedMap: Record<number, number> = {};
+    warehouseItems.forEach(item => {
+      usedMap[item.id!] = 0;
+    });
+
+    allItems.forEach(txItem => {
+      if (txItem.productId < 0) {
+        const warehouseItemId = Math.abs(txItem.productId);
+        if (usedMap[warehouseItemId] !== undefined) {
+          usedMap[warehouseItemId] += txItem.quantity;
+        }
+      } else {
+        const recipes = productRecipes?.filter(r => r.productId === txItem.productId) ?? [];
+        recipes.forEach(recipe => {
+          if (usedMap[recipe.warehouseItemId] !== undefined) {
+            usedMap[recipe.warehouseItemId] += txItem.quantity * recipe.quantity;
+          }
+        });
+      }
+    });
+
+    return warehouseItems.map(item => {
+      const terpakai = usedMap[item.id!] || 0;
+      const sisa = item.stock;
+      const awal = sisa + terpakai;
+      return {
+        id: item.id!,
+        name: item.name,
+        unit: item.unit,
+        awal,
+        terpakai,
+        sisa
+      };
+    });
+  })();
+
   return (
     <div className="px-4 pt-6 pb-20 space-y-5">
       <div className="flex items-center justify-between">
@@ -915,6 +958,46 @@ export default function Laporan() {
                   <div className="text-right">
                     <p className="text-xs font-bold">{rp(p.revenue)}</p>
                     <p className="text-[10px] text-muted-foreground">{p.qty} terjual · laba {rp(p.profit)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Laporan Stok Bahan */}
+      <Card className="border-0 shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-1.5">
+            <Package className="w-4 h-4 text-primary" />
+            Laporan Stok Bahan
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {stockReport.length === 0 ? (
+            <p className="text-xs text-muted-foreground py-4 text-center">Belum ada data stok</p>
+          ) : (
+            <div className="space-y-4">
+              {stockReport.map((item) => (
+                <div key={item.id} className="border-b last:border-0 pb-3 last:pb-0">
+                  <div className="flex justify-between items-center mb-1.5">
+                    <span className="text-sm font-semibold text-foreground">{item.name}</span>
+                    <span className="text-xs text-muted-foreground font-medium bg-secondary/30 px-2.5 py-0.5 rounded-full">{item.unit}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div className="bg-muted/40 p-2 rounded">
+                      <p className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider mb-0.5">Stok Awal</p>
+                      <p className="font-bold text-foreground text-sm">{item.awal}</p>
+                    </div>
+                    <div className="bg-primary/10 p-2 rounded">
+                      <p className="text-[9px] text-primary uppercase font-bold tracking-wider mb-0.5">Terpakai</p>
+                      <p className="font-bold text-primary text-sm">{item.terpakai}</p>
+                    </div>
+                    <div className="bg-success/15 p-2 rounded">
+                      <p className="text-[9px] text-success uppercase font-bold tracking-wider mb-0.5">Sisa Stok</p>
+                      <p className="font-bold text-success text-sm">{item.sisa}</p>
+                    </div>
                   </div>
                 </div>
               ))}
