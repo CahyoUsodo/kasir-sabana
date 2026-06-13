@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type PaymentMethod, type Category, type Unit } from '@/lib/db';
 import { useState, useEffect, useRef } from 'react';
-import { Settings, Store, CreditCard, Tag, Download, Upload, Plus, Trash2, Edit2, Info, Truck, ArrowDownToLine, ArrowUpFromLine, ChevronRight, Receipt, Palette, HardDrive, Package, Camera, X, Ruler, Users as UsersIcon, ShieldCheck, LogOut, Smartphone, CheckCircle2, Globe, Share2, CloudUpload, CloudDownload, KeyRound, Warehouse } from 'lucide-react';
+import { Settings, Store, CreditCard, Tag, Download, Upload, Plus, Trash2, Edit2, Info, Truck, ChevronRight, Receipt, Palette, HardDrive, Camera, X, Ruler, Users as UsersIcon, ShieldCheck, LogOut, Smartphone, CheckCircle2, Globe, Share2, CloudUpload, CloudDownload, KeyRound, Warehouse } from 'lucide-react';
 import ThemeColorPicker from '@/components/ThemeColorPicker';
 import { setThemeColor } from '@/hooks/use-theme-color';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -914,39 +914,6 @@ export default function Pengaturan() {
           </Card>
         </Link>
         {/* Supplier removed per user request */}
-        {can('manage_stock_inout') && (
-          <>
-            <Link to="/stock-in">
-              <Card className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow mb-2">
-                <CardContent className="p-3 flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-success/10 text-success flex items-center justify-center"><ArrowDownToLine className="w-4 h-4" /></div>
-                  <div className="flex-1"><p className="text-sm font-semibold">Stock In</p><p className="text-[10px] text-muted-foreground">Catat barang masuk & HPP otomatis</p></div>
-                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                </CardContent>
-              </Card>
-            </Link>
-            <Link to="/stock-out">
-              <Card className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow mb-2">
-                <CardContent className="p-3 flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center"><ArrowUpFromLine className="w-4 h-4" /></div>
-                  <div className="flex-1"><p className="text-sm font-semibold">Stock Out</p><p className="text-[10px] text-muted-foreground">Catat barang keluar non-penjualan</p></div>
-                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                </CardContent>
-              </Card>
-            </Link>
-          </>
-        )}
-        {can('view_reports') && (
-          <Link to="/stock-report">
-            <Card className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow mb-2">
-              <CardContent className="p-3 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><Package className="w-4 h-4" /></div>
-                <div className="flex-1"><p className="text-sm font-semibold">Laporan Stok</p><p className="text-[10px] text-muted-foreground">Lihat pergerakan stok per periode</p></div>
-                <ChevronRight className="w-4 h-4 text-muted-foreground" />
-              </CardContent>
-            </Card>
-          </Link>
-        )}
         <Link to="/warehouse">
           <Card className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
             <CardContent className="p-3 flex items-center gap-3">

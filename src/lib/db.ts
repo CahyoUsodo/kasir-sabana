@@ -817,6 +817,7 @@ export async function adjustWarehouseStock(productId: number, qtyDelta: number) 
 export async function adjustConfiguredStock(productId: number, qtyDelta: number, selectedOptionIds: number[] = []) {
   if (productId < 0) {
     await adjustWarehouseStock(productId, qtyDelta);
+    await repairInventoryAnomalies();
     return;
   }
 
@@ -830,6 +831,7 @@ export async function adjustConfiguredStock(productId: number, qtyDelta: number,
         updatedAt: new Date()
       });
     }
+    await repairInventoryAnomalies();
     return;
   }
 
@@ -842,6 +844,7 @@ export async function adjustConfiguredStock(productId: number, qtyDelta: number,
       });
     }
   }
+  await repairInventoryAnomalies();
 }
 
 export async function repairInventoryAnomalies() {

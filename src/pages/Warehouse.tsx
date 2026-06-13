@@ -4,9 +4,10 @@ import {
   ensureProductWarehouseLink, 
   upsertDailyPrepFormula, 
   upsertProductRecipe, 
+  repairInventoryAnomalies,
   type WarehouseItem 
 } from '@/lib/db';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { 
   Warehouse, Plus, Trash2, Edit2, ChevronLeft, ArrowRight,
   Scale, X, Layers, AlertCircle, ShoppingBag,
@@ -30,6 +31,47 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { compressImage } from '@/lib/image-utils';
+
+interface FormulaFactorInputProps {
+  initialFactor: number;
+  onSave: (val: number) => void;
+}
+
+function FormulaFactorInput({ initialFactor, onSave }: FormulaFactorInputProps) {
+  const [value, setValue] = useState(initialFactor.toString());
+
+  useEffect(() => {
+    setValue(initialFactor.toString());
+  }, [initialFactor]);
+
+  const handleBlur = () => {
+    const parsed = parseFloat(value);
+    if (!isNaN(parsed) && parsed >= 0) {
+      onSave(parsed);
+      setValue(parsed.toString());
+    } else {
+      setValue(initialFactor.toString());
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.currentTarget.blur();
+    }
+  };
+
+  return (
+    <Input 
+      type="number" 
+      step="any"
+      value={value} 
+      onChange={e => setValue(e.target.value)} 
+      onBlur={handleBlur}
+      onKeyDown={handleKeyDown}
+      className="w-16 h-8 text-center text-xs p-1"
+    />
+  );
+}
 
 export default function WarehousePage() {
   const [searchParams] = useSearchParams();
@@ -131,6 +173,7 @@ export default function WarehousePage() {
         });
         toast.success('Stok barang baru ditambahkan');
       }
+      await repairInventoryAnomalies();
       setItemDialog(false);
       resetItemForm();
     } catch (err) {
@@ -170,6 +213,7 @@ export default function WarehousePage() {
       await db.productRecipes.where('warehouseItemId').equals(id).delete();
       await db.dailyPrepFormulas.where('prepItemId').equals(id).delete();
       await db.dailyPrepFormulas.where('targetItemId').equals(id).delete();
+      await repairInventoryAnomalies();
       toast.success('Barang gudang berhasil dihapus');
     } catch (err) {
       console.error(err);
@@ -199,6 +243,7 @@ export default function WarehousePage() {
         parseInt(selectedWarehouseItemId),
         qty
       );
+      await repairInventoryAnomalies();
       toast.success('Bahan resep berhasil dihubungkan ke produk');
       setRecipeDialog(false);
       setSelectedWarehouseItemId('');
@@ -212,6 +257,7 @@ export default function WarehousePage() {
   const deleteRecipeLink = async (id: number) => {
     try {
       await db.productRecipes.delete(id);
+      await repairInventoryAnomalies();
       toast.success('Bahan resep dilepas dari produk');
     } catch (err) {
       console.error(err);
@@ -270,6 +316,7 @@ export default function WarehousePage() {
       }
 
       await upsertDailyPrepFormula(formulaPrepItem.id!, targetItem.id, factor);
+      await repairInventoryAnomalies();
       setNewFormulaProductId('');
       setNewFormulaFactor('1');
       toast.success('Produk output berhasil ditambahkan ke rumus');
@@ -283,6 +330,7 @@ export default function WarehousePage() {
   const deleteFormulaItem = async (id: number) => {
     try {
       await db.dailyPrepFormulas.delete(id);
+      await repairInventoryAnomalies();
       toast.success('Bahan dihapus dari rumus');
     } catch (err) {
       console.error(err);
@@ -291,10 +339,10 @@ export default function WarehousePage() {
   };
 
   // Update formula multiplier factor
-  const updateFormulaFactor = async (id: number, factorStr: string) => {
-    const factor = parseFloat(factorStr) || 0;
+  const updateFormulaFactor = async (id: number, factor: number) => {
     try {
       await db.dailyPrepFormulas.update(id, { factor });
+      await repairInventoryAnomalies();
     } catch (err) {
       console.error(err);
     }
@@ -370,6 +418,7 @@ export default function WarehousePage() {
           updatedAt: new Date()
         });
       }
+      await repairInventoryAnomalies();
       toast.success(`Berhasil memperbarui persiapan ${prepItem.name}`);
     } catch (err) {
       console.error(err);
@@ -400,18 +449,24 @@ export default function WarehousePage() {
   };
 
   const todayStr = new Date().toLocaleDateString('en-CA');
-  const activeFormulas = formulas?.filter(f => 
-    warehouseItems?.some(item => item.id === f.prepItemId) &&
-    warehouseItems?.some(item => item.id === f.targetItemId)
-  ) || [];
+  const activeFormulas = useMemo(() => {
+    return formulas?.filter(f => 
+      warehouseItems?.some(item => item.id === f.prepItemId) &&
+      warehouseItems?.some(item => item.id === f.targetItemId)
+    ) || [];
+  }, [formulas, warehouseItems]);
   
   // Calculate target item IDs from formulas to filter main list
-  const targetItemIds = new Set(activeFormulas.map(f => f.targetItemId));
+  const targetItemIds = useMemo(() => {
+    return new Set(activeFormulas.map(f => f.targetItemId));
+  }, [activeFormulas]);
 
   // Main prep items are those marked with isDailyReset === 1 and NOT a target of any formula
-  const mainPrepItems = warehouseItems?.filter(item => 
-    item.isDailyReset === 1 && !targetItemIds.has(item.id!)
-  ) || [];
+  const mainPrepItems = useMemo(() => {
+    return warehouseItems?.filter(item => 
+      item.isDailyReset === 1 && !targetItemIds.has(item.id!)
+    ) || [];
+  }, [warehouseItems, targetItemIds]);
 
   const needsPrep = mainPrepItems.some(item => item.lastPreparedDate !== todayStr);
 
@@ -420,15 +475,17 @@ export default function WarehousePage() {
   const prepItemFactor = prepItemId ? (warehouseItems?.find(wi => wi.id === prepItemId)?.dailyPrepFactor || 1) : 1;
   const editingWarehouseItem = itemEditId ? warehouseItems?.find(item => item.id === itemEditId) : undefined;
 
-  const prepSourcesByTarget = activeFormulas.reduce<Record<number, WarehouseItem[]>>((acc, formula) => {
-    const sourceItem = warehouseItems?.find(item => item.id === formula.prepItemId);
-    if (!sourceItem) return acc;
-    if (!acc[formula.targetItemId]) acc[formula.targetItemId] = [];
-    acc[formula.targetItemId].push(sourceItem);
-    return acc;
-  }, {});
+  const prepSourcesByTarget = useMemo(() => {
+    return activeFormulas.reduce<Record<number, WarehouseItem[]>>((acc, formula) => {
+      const sourceItem = warehouseItems?.find(item => item.id === formula.prepItemId);
+      if (!sourceItem) return acc;
+      if (!acc[formula.targetItemId]) acc[formula.targetItemId] = [];
+      acc[formula.targetItemId].push(sourceItem);
+      return acc;
+    }, {});
+  }, [activeFormulas, warehouseItems]);
 
-  const getItemMeta = (item: WarehouseItem) => {
+  const getItemMeta = useCallback((item: WarehouseItem) => {
     const isOutput = targetItemIds.has(item.id!);
     const isPrepMain = item.isDailyReset === 1 && !isOutput;
     const isCashierItem = item.isCashierVisible === 1;
@@ -440,7 +497,7 @@ export default function WarehousePage() {
       prepSources,
       isManual: !isOutput && !isPrepMain && !isCashierItem,
     };
-  };
+  }, [targetItemIds, prepSourcesByTarget]);
 
   const stockFilterOptions = [
     { key: 'all' as const, label: 'Semua' },
@@ -450,14 +507,16 @@ export default function WarehousePage() {
     { key: 'output' as const, label: 'Output Persiapan' },
   ];
 
-  const filteredStockItems = (warehouseItems ?? []).filter(item => {
-    const meta = getItemMeta(item);
-    if (stockFilter === 'manual') return meta.isManual;
-    if (stockFilter === 'cashier') return meta.isCashierItem;
-    if (stockFilter === 'prep') return meta.isPrepMain;
-    if (stockFilter === 'output') return meta.isOutput;
-    return true;
-  });
+  const filteredStockItems = useMemo(() => {
+    return (warehouseItems ?? []).filter(item => {
+      const meta = getItemMeta(item);
+      if (stockFilter === 'manual') return meta.isManual;
+      if (stockFilter === 'cashier') return meta.isCashierItem;
+      if (stockFilter === 'prep') return meta.isPrepMain;
+      if (stockFilter === 'output') return meta.isOutput;
+      return true;
+    });
+  }, [warehouseItems, stockFilter, getItemMeta]);
 
   useEffect(() => {
     const queryTab = searchParams.get('tab');
@@ -1067,12 +1126,9 @@ export default function WarehousePage() {
                       <span className="font-semibold truncate flex-1">{product?.name || targetItem?.name || `Bahan #${f.targetItemId}`}</span>
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-[10px] text-muted-foreground">Faktor:</span>
-                        <Input 
-                          type="number" 
-                          step="any"
-                          value={f.factor} 
-                          onChange={e => updateFormulaFactor(f.id!, e.target.value)} 
-                          className="w-16 h-8 text-center text-xs p-1"
+                        <FormulaFactorInput 
+                          initialFactor={f.factor} 
+                          onSave={val => updateFormulaFactor(f.id!, val)} 
                         />
                         <Button 
                           variant="ghost" 
