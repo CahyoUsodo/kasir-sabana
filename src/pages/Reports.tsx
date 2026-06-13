@@ -183,6 +183,20 @@ export default function Laporan() {
     const normalized = name.toLowerCase();
 
     if (
+      normalized === 'dada' ||
+      normalized === 'paha atas' ||
+      normalized === 'paha bawah' ||
+      normalized === 'sayap' ||
+      normalized === 'nasi'
+    ) return 'Utama';
+
+    if (
+      normalized === 'ayam potong 9' ||
+      normalized === 'daging chicken strip' ||
+      normalized === 'beras 10 liter'
+    ) return 'Bahan Produksi';
+
+    if (
       normalized.includes('plastik') ||
       normalized.includes('box') ||
       normalized.includes('kemasan')
@@ -202,37 +216,33 @@ export default function Laporan() {
       normalized.includes('kopi') ||
       normalized.includes('americano') ||
       normalized.includes('cold brew') ||
+      normalized.includes('butterscotch') ||
+      normalized.includes('matcha') ||
+      normalized.includes('green tea') ||
       normalized.includes('cokelat') ||
       normalized.includes('thai tea')
     ) return 'Minuman';
 
     if (
-      normalized.includes('nasi') ||
-      normalized.includes('beras') ||
-      normalized.includes('kentang')
-    ) return 'Karbohidrat';
-
-    if (
-      normalized.includes('dada') ||
-      normalized.includes('paha') ||
-      normalized.includes('sayap') ||
-      normalized.includes('ayam') ||
-      normalized.includes('daging chicken strip') ||
+      normalized.includes('kentang') ||
       normalized.includes('chicken strip') ||
       normalized.includes('chicken roll') ||
-      normalized.includes('kulit')
-    ) return 'Ayam & Protein';
-
-    if (
+      normalized.includes('kulit') ||
       normalized.includes('bakso') ||
       normalized.includes('burger') ||
       normalized.includes('bun')
-    ) return 'Pelengkap';
+    ) return 'Snack';
+
+    if (
+      normalized.includes('ayam') ||
+      normalized.includes('paha') ||
+      normalized.includes('sayap')
+    ) return 'Bahan Produksi';
 
     return 'Lain-lain';
   };
 
-  const stockCategoryOrder = ['Ayam & Protein', 'Karbohidrat', 'Saus & Bumbu', 'Kemasan', 'Minuman', 'Pelengkap', 'Lain-lain'];
+  const stockCategoryOrder = ['Utama', 'Bahan Produksi', 'Saus & Bumbu', 'Kemasan', 'Minuman', 'Snack', 'Lain-lain'];
 
   const isDateInSelectedPeriod = (dateStr?: string) => {
     if (!dateStr) return false;
