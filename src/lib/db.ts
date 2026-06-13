@@ -1069,3 +1069,130 @@ export async function autoLinkChickenRecipes() {
   }
 }
 
+export async function duplicateProduct(productId: number, currentUserId?: number) {
+  const newProductId = await db.transaction('rw', [
+    db.products,
+    db.productRecipes,
+    db.productOptionGroups,
+    db.productOptions,
+    db.productOptionRecipes
+  ], async () => {
+    const original = await db.products.get(productId);
+    if (!original) {
+      throw new Error('Produk tidak ditemukan');
+    }
+
+    // Generate unique SKU
+    let newSku = `${original.sku}-copy`;
+    let suffix = 1;
+    while (true) {
+      const existing = await db.products.where('sku').equals(newSku).first();
+      if (!existing) break;
+      suffix++;
+      newSku = `${original.sku}-copy${suffix}`;
+    }
+
+    const now = new Date();
+    const newProduct: Product = {
+      name: `${original.name} (Copy)`,
+      sku: newSku,
+      categoryId: original.categoryId,
+      price: original.price,
+      hpp: original.hpp,
+      stock: original.stock,
+      unit: original.unit,
+      description: original.description,
+      photo: original.photo,
+      barcode: original.barcode,
+      createdAt: now,
+      updatedAt: now,
+      isDeleted: 0,
+      deletedAt: null,
+      createdBy: currentUserId,
+      updatedBy: currentUserId
+    };
+
+    const addedId = await db.products.add(newProduct);
+
+    // Duplicate recipes
+    const recipes = await db.productRecipes.where('productId').equals(productId).toArray();
+    if (recipes.length > 0) {
+      const newRecipes = recipes.map(r => ({
+        productId: addedId,
+        warehouseItemId: r.warehouseItemId,
+        quantity: r.quantity
+      }));
+      await db.productRecipes.bulkAdd(newRecipes);
+    }
+
+    // Duplicate option groups & options
+    const optionGroups = await db.productOptionGroups
+      .where('productId')
+      .equals(productId)
+      .toArray();
+    
+    // Filter active option groups
+    const activeGroups = optionGroups.filter(g => g.isDeleted === 0);
+
+    for (const group of activeGroups) {
+      const newGroup = {
+        productId: addedId,
+        name: group.name,
+        required: group.required,
+        minSelect: group.minSelect,
+        maxSelect: group.maxSelect,
+        sortOrder: group.sortOrder,
+        isDeleted: 0,
+        createdAt: now,
+        updatedAt: now
+      };
+      const newGroupId = await db.productOptionGroups.add(newGroup);
+
+      // Get options for this group
+      const options = await db.productOptions
+        .where('groupId')
+        .equals(group.id!)
+        .toArray();
+      
+      const activeOptions = options.filter(o => o.isDeleted === 0);
+
+      for (const option of activeOptions) {
+        const newOption = {
+          groupId: newGroupId,
+          name: option.name,
+          priceDelta: option.priceDelta,
+          hppDelta: option.hppDelta,
+          sortOrder: option.sortOrder,
+          isDefault: option.isDefault,
+          isDeleted: 0,
+          createdAt: now,
+          updatedAt: now
+        };
+        const newOptionId = await db.productOptions.add(newOption);
+
+        // Get option recipes
+        const optionRecipes = await db.productOptionRecipes
+          .where('optionId')
+          .equals(option.id!)
+          .toArray();
+        
+        if (optionRecipes.length > 0) {
+          const newOptionRecipes = optionRecipes.map(or => ({
+            optionId: newOptionId,
+            warehouseItemId: or.warehouseItemId,
+            quantity: or.quantity
+          }));
+          await db.productOptionRecipes.bulkAdd(newOptionRecipes);
+        }
+      }
+    }
+
+    return addedId;
+  });
+
+  // Run repair inventory anomalies after transaction completes successfully
+  await repairInventoryAnomalies();
+
+  return newProductId;
+}
+

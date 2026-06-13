@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Product, type Category, type ProductOption, type ProductOptionGroup, autoLinkChickenRecipes, upsertProductOptionRecipe } from '@/lib/db';
+import { db, type Product, type Category, type ProductOption, type ProductOptionGroup, autoLinkChickenRecipes, upsertProductOptionRecipe, duplicateProduct } from '@/lib/db';
 import { useState, useRef } from 'react';
-import { Plus, Search, Edit2, Trash2, Package as PackageIcon, Camera, X, Settings2, Layers, Link as LinkIcon } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Package as PackageIcon, Camera, X, Settings2, Layers, Link as LinkIcon, Copy } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -455,6 +455,16 @@ export default function Produk() {
     }
   };
 
+  const handleDuplicate = async (p: Product) => {
+    if (!p.id) return;
+    try {
+      await duplicateProduct(p.id, currentUser?.id);
+      toast.success(`Produk "${p.name}" berhasil diduplikasi`);
+    } catch (err: any) {
+      toast.error(`Gagal menduplikat produk: ${err.message}`);
+    }
+  };
+
   return (
     <div className="px-4 pt-6 pb-4 space-y-4">
       {/* Header */}
@@ -561,11 +571,14 @@ export default function Produk() {
                       )}
                     </div>
                   </div>
-                  <div className="flex flex-col gap-1">
+                  <div className="grid grid-cols-2 gap-1 shrink-0">
                     {canManage ? (
                       <>
                         <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Edit ${p.name}`} onClick={() => openEdit(p)}>
                           <Edit2 className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Duplikat ${p.name}`} onClick={() => handleDuplicate(p)}>
+                          <Copy className="w-3.5 h-3.5" />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Opsi ${p.name}`} onClick={() => openOptions(p)}>
                           <Settings2 className="w-3.5 h-3.5" />
