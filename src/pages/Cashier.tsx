@@ -654,13 +654,12 @@ export default function Kasir() {
     const stockKey = buildStockKey(product.id!, selectedOptionIds);
 
     setCart(prev => {
-      const availableStock = product.id! < 0
-        ? Math.max(0, product.stock - prev.filter(item => item.stockKey === stockKey).reduce((sum, item) => sum + item.qty, 0))
-        : getAvailableStockForSelectionSync(
-            product,
-            buildSelectionFromSnapshots(selectedOptions),
-            prev
-          );
+      const availableStock = getAvailableStockForSelectionSync(
+        product,
+        buildSelectionFromSnapshots(selectedOptions),
+        prev,
+        stockKey
+      );
       const configuredProduct = {
         ...getConfiguredProduct(product, selectedOptions),
         stock: availableStock,
@@ -736,10 +735,8 @@ export default function Kasir() {
       if (newQty <= 0) return c;
       const origQty = originalQuantities[stockKey] || 0;
       const selection = buildSelectionFromSnapshots(c.selectedOptions);
-      const availableStock = c.product.id! < 0
-        ? Math.max(0, c.product.stock - prev.filter(item => item.stockKey === stockKey && item.stockKey !== c.stockKey).reduce((sum, item) => sum + item.qty, 0))
-        : getAvailableStockForSelectionSync(c.product, selection, prev, stockKey);
-      const allowedStock = availableStock + c.qty + origQty;
+      const availableStock = getAvailableStockForSelectionSync(c.product, selection, prev, stockKey);
+      const allowedStock = availableStock + origQty;
       if (newQty > allowedStock) { toast.error('Stok tidak cukup'); return c; }
       return { ...c, qty: newQty, product: { ...c.product, stock: availableStock } };
     }));
