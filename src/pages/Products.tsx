@@ -90,13 +90,6 @@ export default function Produk() {
     return matchSearch && matchCategory;
   }) ?? [];
 
-  const filtered = rawFiltered.map(p => {
-    return {
-      ...p,
-      stock: getDisplayStockForProduct(p),
-    };
-  });
-
   const getCategoryName = (catId: number) => categories?.find(c => c.id === catId)?.name ?? '-';
   const getCategoryColor = (catId: number) => categories?.find(c => c.id === catId)?.color ?? '#999';
 
@@ -148,6 +141,13 @@ export default function Produk() {
 
     return minStock === Infinity ? 0 : minStock;
   };
+
+  const filtered = rawFiltered.map(p => {
+    return {
+      ...p,
+      stock: getDisplayStockForProduct(p),
+    };
+  });
 
   const hasProductOptions = (productId?: number) => getProductGroups(productId).length > 0;
   const getProductOptionCount = (productId?: number) =>
