@@ -70,6 +70,70 @@ export default function Laporan() {
   const grossProfit = netSales - totalHpp;
   const marginPercent = netSales > 0 ? (grossProfit / netSales * 100) : 0;
 
+  const txDiscountInfo: Record<number, { extraDiscount: number; itemSubtotalSum: number }> = {};
+  transactions?.forEach(t => {
+    const txItems = allItems.filter(item => item.transactionId === t.id);
+    const itemDiscountSum = txItems.reduce((sum, item) => sum + (item.discountAmount || 0), 0);
+    const itemSubtotalSum = txItems.reduce((sum, item) => sum + item.subtotal, 0);
+    if (t.id) {
+      txDiscountInfo[t.id] = {
+        extraDiscount: Math.max(0, (t.discountAmount || 0) - itemDiscountSum),
+        itemSubtotalSum,
+      };
+    }
+  });
+
+  const getAllocatedExtraDiscount = (item: TransactionItemRecord) => {
+    const txId = item.transactionId;
+    if (!txId) return 0;
+    const info = txDiscountInfo[txId];
+    if (!info || info.extraDiscount <= 0 || info.itemSubtotalSum <= 0) return 0;
+    return (item.subtotal / info.itemSubtotalSum) * info.extraDiscount;
+  };
+
+  const buildProductAggregation = () => {
+    const aggregated: Record<string, {
+      name: string;
+      qty: number;
+      grossRevenue: number;
+      allocatedDiscount: number;
+      netRevenue: number;
+      hpp: number;
+      profit: number;
+      productId: number;
+    }> = {};
+
+    allItems.forEach(item => {
+      const key = item.productName;
+      if (!aggregated[key]) {
+        aggregated[key] = {
+          name: key,
+          qty: 0,
+          grossRevenue: 0,
+          allocatedDiscount: 0,
+          netRevenue: 0,
+          hpp: 0,
+          profit: 0,
+          productId: item.productId,
+        };
+      }
+
+      const extraDiscount = getAllocatedExtraDiscount(item);
+      const totalItemDiscount = (item.discountAmount || 0) + extraDiscount;
+      const netRevenuePerItem = Math.max(0, item.subtotal - totalItemDiscount);
+      const hpp = item.hpp * item.quantity;
+
+      aggregated[key].qty += item.quantity;
+      aggregated[key].grossRevenue += item.subtotal;
+      aggregated[key].allocatedDiscount += totalItemDiscount;
+      aggregated[key].netRevenue += netRevenuePerItem;
+      aggregated[key].hpp += hpp;
+      aggregated[key].profit += netRevenuePerItem - hpp;
+    });
+
+    return Object.values(aggregated);
+  };
+
   // Chart data
   const chartData = (() => {
     const map: Record<string, number> = {};
@@ -108,14 +172,10 @@ export default function Laporan() {
   })();
 
   // Top products
-  const productSales: Record<string, { name: string; qty: number; revenue: number; profit: number }> = {};
-  allItems.forEach(item => {
-    if (!productSales[item.productName]) productSales[item.productName] = { name: item.productName, qty: 0, revenue: 0, profit: 0 };
-    productSales[item.productName].qty += item.quantity;
-    productSales[item.productName].revenue += item.subtotal;
-    productSales[item.productName].profit += (item.price - item.hpp) * item.quantity - (item.discountAmount || 0);
-  });
-  const topProducts = Object.values(productSales).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
+  const productSales = buildProductAggregation();
+  const topProducts = [...productSales]
+    .sort((a, b) => (b.qty - a.qty) || (b.netRevenue - a.netRevenue))
+    .slice(0, 5);
 
   const rp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
 
@@ -477,7 +537,7 @@ export default function Laporan() {
     // ============================================
     // SHEET 2: Detail Transaksi
     // ============================================
-    const wsDetail = wb.addWorksheet('Detail Transaksi');
+    const wsDetail = wb.addWorksheet('Detail Transaksi', { views: [{ state: 'frozen', ySplit: 1 }] });
     wsDetail.columns = [
       { header: 'No', key: 'no', width: 6 },
       { header: 'Tanggal', key: 'date', width: 20 },
@@ -493,6 +553,7 @@ export default function Laporan() {
     wsDetail.getRow(1).eachCell(cell => {
       cell.style = headerStyle;
     });
+    wsDetail.autoFilter = 'A1:I1';
 
     let sumGross = 0, sumDiscount = 0, sumNet = 0, sumHpp = 0, sumProfit = 0;
 
@@ -544,13 +605,15 @@ export default function Laporan() {
     // ============================================
     // SHEET 3: Produk Terlaris
     // ============================================
-    const wsProduk = wb.addWorksheet('Produk Terlaris');
+    const wsProduk = wb.addWorksheet('Produk Terlaris', { views: [{ state: 'frozen', ySplit: 1 }] });
     wsProduk.columns = [
       { header: 'No', key: 'no', width: 6 },
-      { header: 'Nama Produk', key: 'name', width: 30 },
+      { header: 'Nama Produk', key: 'name', width: 40 },
       { header: 'Jumlah Terjual', key: 'qty', width: 16 },
       { header: 'Satuan', key: 'unit', width: 12 },
       { header: 'Total Pendapatan Kotor', key: 'gross', width: 25, style: { numFmt: currencyFormat } },
+      { header: 'Diskon Alokasi', key: 'discount', width: 18, style: { numFmt: currencyFormat } },
+      { header: 'Penjualan Bersih', key: 'net', width: 22, style: { numFmt: currencyFormat } },
       { header: 'Total HPP (Modal)', key: 'hpp', width: 22, style: { numFmt: currencyFormat } },
       { header: 'Total Laba Kotor', key: 'profit', width: 22, style: { numFmt: currencyFormat } },
       { header: 'Margin', key: 'margin', width: 12, style: { numFmt: percentFormat } },
@@ -559,55 +622,37 @@ export default function Laporan() {
     wsProduk.getRow(1).eachCell(cell => {
       cell.style = headerStyle;
     });
+    wsProduk.autoFilter = 'A1:J1';
+    wsProduk.getColumn('name').alignment = { wrapText: true, vertical: 'top' };
 
-    // Pre-compute transaction-level discount distribution
-    // Discounts applied to the whole cart aren't in item.discountAmount,
-    // so we distribute them proportionally across items by subtotal share.
-    const txDiscountInfo: Record<number, { extraDiscount: number; itemSubtotalSum: number }> = {};
-    transactions.forEach(t => {
-      const txItems = allItems.filter(item => item.transactionId === t.id);
-      const itemDiscountSum = txItems.reduce((s, item) => s + (item.discountAmount || 0), 0);
-      const itemSubtotalSum = txItems.reduce((s, item) => s + item.subtotal, 0);
-      if (t.id) txDiscountInfo[t.id] = { extraDiscount: (t.discountAmount || 0) - itemDiscountSum, itemSubtotalSum };
-    });
-
-    // Build per-product aggregation
-    const prodAgg: Record<string, {
-      name: string; qty: number; revenue: number;
-      hpp: number; profit: number; productId: number;
-    }> = {};
-    allItems.forEach(item => {
-      const key = item.productName;
-      if (!prodAgg[key]) prodAgg[key] = { name: key, qty: 0, revenue: 0, hpp: 0, profit: 0, productId: item.productId };
-      prodAgg[key].qty += item.quantity;
-      prodAgg[key].revenue += item.subtotal;
-      prodAgg[key].hpp += item.hpp * item.quantity;
-      prodAgg[key].profit += item.subtotal - (item.hpp * item.quantity);
-    });
-
-    const prodSorted = Object.values(prodAgg).sort((a, b) => b.revenue - a.revenue);
+    const prodSorted = [...productSales].sort((a, b) => (b.qty - a.qty) || (b.netRevenue - a.netRevenue));
 
     prodSorted.forEach((p, i) => {
-      const margin = p.revenue > 0 ? (p.profit / p.revenue) : 0;
+      const margin = p.netRevenue > 0 ? (p.profit / p.netRevenue) : 0;
       const row = wsProduk.addRow({
         no: i + 1,
         name: p.name,
         qty: p.qty,
         unit: productUnitMap[p.productId] || 'pcs',
-        gross: p.revenue,
+        gross: p.grossRevenue,
+        discount: p.allocatedDiscount,
+        net: p.netRevenue,
         hpp: p.hpp,
         profit: p.profit,
         margin: margin
       });
+      row.alignment = { vertical: 'top' };
       row.eachCell(cell => { cell.border = cellBorder; });
     });
 
-    // Footer: Sub Total Laba Kotor, Diskon (conditional), Grand Total
+    // Footer: Subtotal Kotor, Diskon, Total Bersih
     const prodSubTotalProfit = prodSorted.reduce((s, p) => s + p.profit, 0);
+    const prodSubTotalGross = prodSorted.reduce((s, p) => s + p.grossRevenue, 0);
+    const prodSubTotalNet = prodSorted.reduce((s, p) => s + p.netRevenue, 0);
     const prodTotalDiscount = totalDiscount;
 
-    const prodSubRow = wsProduk.addRow({ no: 'Sub Total Laba Kotor', name: '', qty: '', unit: '', gross: '', hpp: '', profit: prodSubTotalProfit, margin: '' });
-    wsProduk.mergeCells(`A${prodSubRow.number}:F${prodSubRow.number}`);
+    const prodSubRow = wsProduk.addRow({ no: 'Subtotal Kotor', name: '', qty: '', unit: '', gross: prodSubTotalGross, discount: '', net: '', hpp: '', profit: '', margin: '' });
+    wsProduk.mergeCells(`A${prodSubRow.number}:D${prodSubRow.number}`);
     prodSubRow.getCell('A').alignment = { horizontal: 'right', vertical: 'middle' };
     prodSubRow.eachCell(cell => {
       cell.border = cellBorder;
@@ -616,8 +661,8 @@ export default function Laporan() {
     });
 
     if (prodTotalDiscount > 0) {
-      const prodDiscRow = wsProduk.addRow({ no: 'Diskon', name: '', qty: '', unit: '', gross: '', hpp: '', profit: prodTotalDiscount, margin: '' });
-      wsProduk.mergeCells(`A${prodDiscRow.number}:F${prodDiscRow.number}`);
+      const prodDiscRow = wsProduk.addRow({ no: 'Diskon', name: '', qty: '', unit: '', gross: '', discount: prodTotalDiscount, net: '', hpp: '', profit: '', margin: '' });
+      wsProduk.mergeCells(`A${prodDiscRow.number}:D${prodDiscRow.number}`);
       prodDiscRow.getCell('A').alignment = { horizontal: 'right', vertical: 'middle' };
       prodDiscRow.eachCell(cell => {
         cell.border = cellBorder;
@@ -625,8 +670,8 @@ export default function Laporan() {
       });
     }
 
-    const prodGrandRow = wsProduk.addRow({ no: 'Grand Total Laba Kotor', name: '', qty: '', unit: '', gross: '', hpp: '', profit: prodSubTotalProfit - prodTotalDiscount, margin: '' });
-    wsProduk.mergeCells(`A${prodGrandRow.number}:F${prodGrandRow.number}`);
+    const prodGrandRow = wsProduk.addRow({ no: 'Total Bersih', name: '', qty: '', unit: '', gross: '', discount: '', net: prodSubTotalNet, hpp: totalHpp, profit: prodSubTotalProfit, margin: netSales > 0 ? grossProfit / netSales : 0 });
+    wsProduk.mergeCells(`A${prodGrandRow.number}:D${prodGrandRow.number}`);
     prodGrandRow.getCell('A').alignment = { horizontal: 'right', vertical: 'middle' };
     prodGrandRow.eachCell(cell => {
       cell.border = cellBorder;
@@ -637,13 +682,15 @@ export default function Laporan() {
     // ============================================
     // SHEET 4: Detail Penjualan Harian
     // ============================================
-    const wsHarian = wb.addWorksheet('Detail Penjualan Harian');
+    const wsHarian = wb.addWorksheet('Detail Penjualan Harian', { views: [{ state: 'frozen', ySplit: 1 }] });
     wsHarian.columns = [
       { header: 'Tanggal', key: 'date', width: 18 },
-      { header: 'Nama Produk', key: 'name', width: 30 },
+      { header: 'Nama Produk', key: 'name', width: 40 },
       { header: 'Jumlah Terjual', key: 'qty', width: 16 },
       { header: 'Satuan', key: 'unit', width: 12 },
       { header: 'Total Pendapatan Kotor', key: 'gross', width: 25, style: { numFmt: currencyFormat } },
+      { header: 'Diskon Alokasi', key: 'discount', width: 18, style: { numFmt: currencyFormat } },
+      { header: 'Penjualan Bersih', key: 'net', width: 22, style: { numFmt: currencyFormat } },
       { header: 'Total HPP (Modal)', key: 'hpp', width: 22, style: { numFmt: currencyFormat } },
       { header: 'Total Laba Kotor', key: 'profit', width: 22, style: { numFmt: currencyFormat } },
     ];
@@ -651,31 +698,43 @@ export default function Laporan() {
     wsHarian.getRow(1).eachCell(cell => {
       cell.style = headerStyle;
     });
+    wsHarian.autoFilter = 'A1:I1';
+    wsHarian.getColumn('name').alignment = { wrapText: true, vertical: 'top' };
 
-    // Build daily per-product aggregation: { 'dd-MM-yyyy': { productName: { qty, revenue, hpp, profit, productId } } }
+    // Build daily per-product aggregation
     const dailyAgg: Record<string, Record<string, {
-      name: string; qty: number; revenue: number;
-      hpp: number; profit: number; productId: number;
+      name: string; qty: number; grossRevenue: number; allocatedDiscount: number;
+      netRevenue: number; hpp: number; profit: number; productId: number;
     }>> = {};
 
-    // Also build per-day discount totals
-    const dailyDiscountMap: Record<string, number> = {};
     transactions.forEach(t => {
       const dateKey = format(new Date(t.date), 'dd-MM-yyyy', { locale: localeId });
       if (!dailyAgg[dateKey]) dailyAgg[dateKey] = {};
-      if (!dailyDiscountMap[dateKey]) dailyDiscountMap[dateKey] = 0;
-      dailyDiscountMap[dateKey] += (t.discountAmount || 0);
 
       const txItems = allItems.filter(item => item.transactionId === t.id);
       txItems.forEach(item => {
         const key = item.productName;
         if (!dailyAgg[dateKey][key]) {
-          dailyAgg[dateKey][key] = { name: key, qty: 0, revenue: 0, hpp: 0, profit: 0, productId: item.productId };
+          dailyAgg[dateKey][key] = {
+            name: key,
+            qty: 0,
+            grossRevenue: 0,
+            allocatedDiscount: 0,
+            netRevenue: 0,
+            hpp: 0,
+            profit: 0,
+            productId: item.productId
+          };
         }
+        const extraDiscount = getAllocatedExtraDiscount(item);
+        const totalItemDiscount = (item.discountAmount || 0) + extraDiscount;
+        const netRevenuePerItem = Math.max(0, item.subtotal - totalItemDiscount);
         dailyAgg[dateKey][key].qty += item.quantity;
-        dailyAgg[dateKey][key].revenue += item.subtotal;
+        dailyAgg[dateKey][key].grossRevenue += item.subtotal;
+        dailyAgg[dateKey][key].allocatedDiscount += totalItemDiscount;
+        dailyAgg[dateKey][key].netRevenue += netRevenuePerItem;
         dailyAgg[dateKey][key].hpp += item.hpp * item.quantity;
-        dailyAgg[dateKey][key].profit += item.subtotal - (item.hpp * item.quantity);
+        dailyAgg[dateKey][key].profit += netRevenuePerItem - (item.hpp * item.quantity);
       });
     });
 
@@ -686,20 +745,20 @@ export default function Laporan() {
       return new Date(ya, ma - 1, da).getTime() - new Date(yb, mb - 1, db).getTime();
     });
 
-    let grandQty = 0, grandRevenue = 0, grandHpp = 0, grandProfit = 0;
+    let grandQty = 0, grandGrossRevenue = 0, grandDiscount = 0, grandNetRevenue = 0, grandHpp = 0, grandProfit = 0;
 
     sortedDates.forEach(dateKey => {
-      const productsOfDay = Object.values(dailyAgg[dateKey]).sort((a, b) => b.revenue - a.revenue);
+      const productsOfDay = Object.values(dailyAgg[dateKey]).sort((a, b) => (b.qty - a.qty) || (b.netRevenue - a.netRevenue));
 
       // Date header row
-      const dateRow = wsHarian.addRow({ date: `📅 ${dateKey}`, name: '', qty: '', unit: '', gross: '', hpp: '', profit: '' });
-      wsHarian.mergeCells(`A${dateRow.number}:G${dateRow.number}`);
+      const dateRow = wsHarian.addRow({ date: `Tanggal ${dateKey}`, name: '', qty: '', unit: '', gross: '', discount: '', net: '', hpp: '', profit: '' });
+      wsHarian.mergeCells(`A${dateRow.number}:I${dateRow.number}`);
       dateRow.getCell('A').font = { bold: true, size: 12, color: { argb: 'FFB42829' } };
       dateRow.getCell('A').fill = dateHeaderFill;
       dateRow.getCell('A').alignment = { vertical: 'middle' };
       dateRow.height = 22;
 
-      let dayQty = 0, dayRevenue = 0, dayHpp = 0, dayProfit = 0;
+      let dayQty = 0, dayGrossRevenue = 0, dayDiscount = 0, dayNetRevenue = 0, dayHpp = 0, dayProfit = 0;
 
       productsOfDay.forEach(p => {
         const row = wsHarian.addRow({
@@ -707,14 +766,19 @@ export default function Laporan() {
           name: p.name,
           qty: p.qty,
           unit: productUnitMap[p.productId] || 'pcs',
-          gross: p.revenue,
+          gross: p.grossRevenue,
+          discount: p.allocatedDiscount,
+          net: p.netRevenue,
           hpp: p.hpp,
           profit: p.profit,
         });
+        row.alignment = { vertical: 'top' };
         row.eachCell(cell => { cell.border = cellBorder; });
 
         dayQty += p.qty;
-        dayRevenue += p.revenue;
+        dayGrossRevenue += p.grossRevenue;
+        dayDiscount += p.allocatedDiscount;
+        dayNetRevenue += p.netRevenue;
         dayHpp += p.hpp;
         dayProfit += p.profit;
       });
@@ -722,12 +786,14 @@ export default function Laporan() {
       // Subtotal row per date
       const subRow = wsHarian.addRow({
         date: '',
-        name: `Sub Total Laba Kotor ${dateKey}`,
+        name: `Subtotal Kotor ${dateKey}`,
         qty: dayQty,
         unit: '',
-        gross: dayRevenue,
+        gross: dayGrossRevenue,
+        discount: '',
+        net: '',
         hpp: dayHpp,
-        profit: dayProfit,
+        profit: '',
       });
       subRow.eachCell(cell => {
         cell.border = cellBorder;
@@ -735,48 +801,46 @@ export default function Laporan() {
         cell.fill = subtotalFill;
       });
 
-      // Per-day discount row (only if that day has discounts)
-      const dayDiscount = dailyDiscountMap[dateKey] || 0;
       if (dayDiscount > 0) {
-        const dayDiscRow = wsHarian.addRow({ date: '', name: `Diskon ${dateKey}`, qty: '', unit: '', gross: '', hpp: '', profit: dayDiscount });
+        const dayDiscRow = wsHarian.addRow({ date: '', name: `Diskon ${dateKey}`, qty: '', unit: '', gross: '', discount: dayDiscount, net: '', hpp: '', profit: '' });
         dayDiscRow.eachCell(cell => {
           cell.border = cellBorder;
           cell.font = { bold: true, color: { argb: 'FFB42829' } };
         });
-
-        const dayTotalRow = wsHarian.addRow({ date: '', name: `Total ${dateKey}`, qty: dayQty, unit: '', gross: dayRevenue, hpp: dayHpp, profit: dayProfit - dayDiscount });
-        dayTotalRow.eachCell(cell => {
-          cell.border = cellBorder;
-          cell.font = { bold: true, color: { argb: 'FFB42829' } };
-          cell.fill = subtotalFill;
-        });
       }
 
+      const dayTotalRow = wsHarian.addRow({ date: '', name: `Total Bersih ${dateKey}`, qty: dayQty, unit: '', gross: '', discount: '', net: dayNetRevenue, hpp: dayHpp, profit: dayProfit });
+      dayTotalRow.eachCell(cell => {
+        cell.border = cellBorder;
+        cell.font = { bold: true, color: { argb: 'FFB42829' } };
+        cell.fill = subtotalFill;
+      });
+
       grandQty += dayQty;
-      grandRevenue += dayRevenue;
+      grandGrossRevenue += dayGrossRevenue;
+      grandDiscount += dayDiscount;
+      grandNetRevenue += dayNetRevenue;
       grandHpp += dayHpp;
       grandProfit += dayProfit;
     });
 
-    // Grand total footer: Sub Total, Diskon (conditional), Grand Total
-    const grandTotalDiscount = totalDiscount;
-
-    const grandSubRow = wsHarian.addRow({ date: '', name: 'Sub Total Laba Kotor', qty: grandQty, unit: '', gross: grandRevenue, hpp: grandHpp, profit: grandProfit });
+    // Grand total footer
+    const grandSubRow = wsHarian.addRow({ date: '', name: 'Subtotal Kotor', qty: grandQty, unit: '', gross: grandGrossRevenue, discount: '', net: '', hpp: '', profit: '' });
     grandSubRow.eachCell(cell => {
       cell.border = cellBorder;
       cell.font = { bold: true };
       cell.fill = subtotalFill;
     });
 
-    if (grandTotalDiscount > 0) {
-      const grandDiscRow = wsHarian.addRow({ date: '', name: 'Diskon', qty: '', unit: '', gross: '', hpp: '', profit: grandTotalDiscount });
+    if (grandDiscount > 0) {
+      const grandDiscRow = wsHarian.addRow({ date: '', name: 'Diskon', qty: '', unit: '', gross: '', discount: grandDiscount, net: '', hpp: '', profit: '' });
       grandDiscRow.eachCell(cell => {
         cell.border = cellBorder;
         cell.font = { bold: true, color: { argb: 'FFB42829' } };
       });
     }
 
-    const grandRow = wsHarian.addRow({ date: '', name: 'Grand Total', qty: grandQty, unit: '', gross: grandRevenue, hpp: grandHpp, profit: grandProfit - grandTotalDiscount });
+    const grandRow = wsHarian.addRow({ date: '', name: 'Grand Total Bersih', qty: grandQty, unit: '', gross: '', discount: '', net: grandNetRevenue, hpp: grandHpp, profit: grandProfit });
     grandRow.eachCell(cell => {
       cell.border = cellBorder;
       cell.font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
@@ -786,7 +850,7 @@ export default function Laporan() {
     // ============================================
     // SHEET 5: Laporan Stok Bahan
     // ============================================
-    const wsStok = wb.addWorksheet('Laporan Stok Bahan');
+    const wsStok = wb.addWorksheet('Laporan Stok Bahan', { views: [{ state: 'frozen', ySplit: 1 }] });
     wsStok.columns = [
       { header: 'No', key: 'no', width: 6 },
       { header: 'Nama Bahan', key: 'name', width: 30 },
@@ -799,6 +863,7 @@ export default function Laporan() {
     wsStok.getRow(1).eachCell(cell => {
       cell.style = headerStyle;
     });
+    wsStok.autoFilter = 'A1:F1';
 
     stockReport.forEach((item, i) => {
       const row = wsStok.addRow({
@@ -1010,11 +1075,14 @@ export default function Laporan() {
                 <div key={p.name} className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center">{i + 1}</span>
-                    <span className="text-sm">{p.name}</span>
+                    <div className="min-w-0">
+                      <p className="text-sm leading-tight break-words">{p.name}</p>
+                      <p className="text-[10px] text-muted-foreground">{p.qty} terjual</p>
+                    </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs font-bold">{rp(p.revenue)}</p>
-                    <p className="text-[10px] text-muted-foreground">{p.qty} terjual · laba {rp(p.profit)}</p>
+                    <p className="text-xs font-bold">{rp(p.netRevenue)}</p>
+                    <p className="text-[10px] text-muted-foreground">bersih · laba {rp(p.profit)}</p>
                   </div>
                 </div>
               ))}

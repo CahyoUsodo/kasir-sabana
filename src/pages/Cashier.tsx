@@ -345,6 +345,14 @@ export default function Kasir() {
     };
   };
 
+  const getCartItemTitle = (item: CartItem) => item.baseName || item.product.name;
+
+  const getCartItemOptionSummary = (item: CartItem) =>
+    item.selectedOptions
+      .map(option => option.optionName)
+      .filter(Boolean)
+      .join(' • ');
+
   const validateSelection = (product: Product, selection: Record<number, number[]>) => {
     for (const group of getProductGroups(product.id)) {
       const selected = selection[group.id!] ?? [];
@@ -1099,7 +1107,12 @@ export default function Kasir() {
                 <div key={item.stockKey} className="bg-muted/50 p-3 rounded-xl space-y-1.5">
                   <div className="flex items-center gap-3">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate">{item.product.name}</p>
+                      <p className="text-sm font-semibold truncate">{getCartItemTitle(item)}</p>
+                      {getCartItemOptionSummary(item) && (
+                        <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                          {getCartItemOptionSummary(item)}
+                        </p>
+                      )}
                       <p className="text-xs text-muted-foreground">Rp {item.product.price.toLocaleString('id-ID')} × {item.qty}</p>
                       {item.discountType && getItemDiscountAmount(item) > 0 && (
                         <p className="text-[10px] text-destructive">
@@ -1307,7 +1320,12 @@ export default function Kasir() {
                 <div key={item.stockKey} className="bg-muted/50 p-3 rounded-xl space-y-1.5">
                   <div className="flex items-center gap-3">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate">{item.product.name}</p>
+                      <p className="text-sm font-semibold truncate">{getCartItemTitle(item)}</p>
+                      {getCartItemOptionSummary(item) && (
+                        <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                          {getCartItemOptionSummary(item)}
+                        </p>
+                      )}
                       <p className="text-xs text-muted-foreground">Rp {item.product.price.toLocaleString('id-ID')} × {item.qty}</p>
                       {item.discountType && getItemDiscountAmount(item) > 0 && (
                         <p className="text-[10px] text-destructive">
