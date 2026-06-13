@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useMemo } from 'react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import { Download, Share2, Printer, X } from 'lucide-react';
@@ -131,18 +131,24 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
   const [previewType, setPreviewType] = useState<'customer' | 'kitchen'>('customer');
   const [resolvedItemDetails, setResolvedItemDetails] = useState<Record<string, string[]>>({});
 
-  const printableItems = items.filter(item => item.productId >= 0);
-  const printableItemsKey = JSON.stringify(
-    printableItems.map(item => ({
-      id: item.id,
-      transactionId: item.transactionId,
-      productId: item.productId,
-      stockKey: item.stockKey,
-      productName: item.productName,
-      productBaseName: item.productBaseName,
-      selectedOptionIds: item.selectedOptions?.map(option => option.optionId) ?? [],
-      receiptDetails: item.receiptDetails ?? [],
-    }))
+  const printableItems = useMemo(
+    () => items.filter(item => item.productId >= 0),
+    [items]
+  );
+  const printableItemsKey = useMemo(
+    () => JSON.stringify(
+      printableItems.map(item => ({
+        id: item.id,
+        transactionId: item.transactionId,
+        productId: item.productId,
+        stockKey: item.stockKey,
+        productName: item.productName,
+        productBaseName: item.productBaseName,
+        selectedOptionIds: item.selectedOptions?.map(option => option.optionId) ?? [],
+        receiptDetails: item.receiptDetails ?? [],
+      }))
+    ),
+    [printableItems]
   );
   const getItemKey = (item: TransactionItemRecord, index: number) =>
     String(item.id ?? `${item.transactionId}-${item.stockKey ?? `${item.productId}-${index}`}`);
