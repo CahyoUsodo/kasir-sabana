@@ -496,6 +496,73 @@ export default function WarehousePage() {
     };
   }, [targetItemIds, prepSourcesByTarget]);
 
+  const normalizeText = useCallback((value?: string) => {
+    return (value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  }, []);
+
+  const getWarehouseItemSpecificRank = useCallback((item: WarehouseItem) => {
+    const name = normalizeText(item.name);
+    if (name.includes('ayam potong 9')) return 0;
+    if (name.includes('daging chicken strip')) return 1;
+    if (name === 'sayap') return 2;
+    if (name === 'paha bawah') return 3;
+    if (name === 'dada') return 4;
+    if (name === 'paha atas') return 5;
+    if (name.includes('plastik kecil')) return 10;
+    if (name.includes('plastik besar')) return 11;
+    if (name.includes('saus sambal saset')) return 12;
+    if (name.includes('saus tomat saset')) return 13;
+    if (name === 'nasi') return 14;
+    return 99;
+  }, [normalizeText]);
+
+  const compareWarehouseItems = useCallback((a: WarehouseItem, b: WarehouseItem) => {
+    const aMeta = getItemMeta(a);
+    const bMeta = getItemMeta(b);
+
+    const getTypeRank = (item: WarehouseItem) => {
+      const meta = getItemMeta(item);
+      if (meta.isPrepMain) return 0;
+      if (meta.isOutput) return 1;
+      if (meta.isCashierItem) return 2;
+      return 3;
+    };
+
+    const typeDiff = getTypeRank(a) - getTypeRank(b);
+    if (typeDiff !== 0) return typeDiff;
+
+    const specificDiff = getWarehouseItemSpecificRank(a) - getWarehouseItemSpecificRank(b);
+    if (specificDiff !== 0) return specificDiff;
+
+    if (aMeta.isCashierItem || aMeta.isManual || bMeta.isCashierItem || bMeta.isManual) {
+      const stockDiff = a.stock - b.stock;
+      if (stockDiff !== 0) return stockDiff;
+    }
+
+    return normalizeText(a.name).localeCompare(normalizeText(b.name), 'id');
+  }, [getItemMeta, getWarehouseItemSpecificRank, normalizeText]);
+
+  const getRecipeProductRank = useCallback((product: { name: string }) => {
+    const name = normalizeText(product.name);
+    if (name.includes('sayap')) return 0;
+    if (name.includes('paha bawah')) return 1;
+    if (name.includes('dada')) return 2;
+    if (name.includes('paha atas')) return 3;
+    if (name.includes('paket bundling')) return 4;
+    if (name.includes('rice bowl')) return 5;
+    if (name.includes('ayam sambal')) return 6;
+    if (name.includes('bakso')) return 7;
+    if (name.includes('chicken roll')) return 8;
+    if (name.includes('chicken strip')) return 9;
+    if (name.includes('kulit')) return 10;
+    if (name.includes('kentang')) return 11;
+    if (name.includes('chicken bun')) return 12;
+    if (name.includes('burger')) return 13;
+    if (name.includes('saus') || name.includes('sambal')) return 14;
+    if (name.includes('teh') || name.includes('kopi') || name.includes('fruit tea') || name.includes('matcha')) return 15;
+    return 99;
+  }, [normalizeText]);
+
   const stockFilterOptions = [
     { key: 'all' as const, label: 'Semua' },
     { key: 'manual' as const, label: 'Manual' },
@@ -512,8 +579,18 @@ export default function WarehousePage() {
       if (stockFilter === 'prep') return meta.isPrepMain;
       if (stockFilter === 'output') return meta.isOutput;
       return true;
-    });
-  }, [warehouseItems, stockFilter, getItemMeta]);
+    }).sort(compareWarehouseItems);
+  }, [warehouseItems, stockFilter, getItemMeta, compareWarehouseItems]);
+
+  const sortedRecipeProducts = useMemo(() => {
+    return (cashierProducts ?? [])
+      .filter(product => (recipes?.some(recipe => recipe.productId === product.id) ?? false))
+      .sort((a, b) => {
+        const rankDiff = getRecipeProductRank(a) - getRecipeProductRank(b);
+        if (rankDiff !== 0) return rankDiff;
+        return normalizeText(a.name).localeCompare(normalizeText(b.name), 'id');
+      });
+  }, [cashierProducts, recipes, getRecipeProductRank, normalizeText]);
 
   useEffect(() => {
     const queryTab = searchParams.get('tab');
@@ -715,8 +792,13 @@ export default function WarehousePage() {
           </div>
 
           <div className="space-y-4">
-            {cashierProducts?.map(prod => {
-              const prodRecipes = recipes?.filter(r => r.productId === prod.id) || [];
+            {sortedRecipeProducts.map(prod => {
+              const prodRecipes = (recipes?.filter(r => r.productId === prod.id) || []).sort((a, b) => {
+                const itemA = warehouseItems?.find(wi => wi.id === a.warehouseItemId);
+                const itemB = warehouseItems?.find(wi => wi.id === b.warehouseItemId);
+                if (!itemA || !itemB) return (a.id || 0) - (b.id || 0);
+                return compareWarehouseItems(itemA, itemB);
+              });
               if (prodRecipes.length === 0) return null;
 
               return (

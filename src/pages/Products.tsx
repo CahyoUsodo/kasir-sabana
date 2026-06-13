@@ -209,6 +209,16 @@ export default function Produk() {
     return item ? `${item.name} (${item.unit})` : `Bahan #${warehouseItemId}`;
   };
 
+  const getDisplayPhotoForProduct = (product: Product) => {
+    if (product.photo) return product.photo;
+    if (hasProductOptions(product.id)) return undefined;
+
+    const linkedRecipes = (productRecipes ?? []).filter(recipe => recipe.productId === product.id);
+    if (linkedRecipes.length !== 1) return undefined;
+
+    return visibleWarehouseItems?.find(item => item.id === linkedRecipes[0].warehouseItemId)?.photo;
+  };
+
   const getStockFieldMeta = () => {
     if (!editProduct?.id) {
       return {
@@ -614,8 +624,8 @@ export default function Produk() {
                 <div className="flex items-start gap-3">
                   {/* Product thumbnail */}
                   <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center shrink-0 overflow-hidden">
-                    {p.photo ? (
-                      <img src={p.photo} alt={p.name} className="w-full h-full object-cover" />
+                    {getDisplayPhotoForProduct(p) ? (
+                      <img src={getDisplayPhotoForProduct(p)} alt={p.name} className="w-full h-full object-cover" />
                     ) : (
                       <PackageIcon className="w-5 h-5 text-muted-foreground/40" />
                     )}

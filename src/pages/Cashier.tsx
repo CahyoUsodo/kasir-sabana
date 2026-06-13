@@ -239,6 +239,55 @@ export default function Kasir() {
     return minStock === Infinity ? 0 : minStock;
   };
 
+  const getAvailableStockForSelectionSync = (product: Product, selection: Record<number, number[]>) => {
+    const selectedOptionIds = getSelectedOptionIds(selection);
+    const usage = new Map<number, number>();
+    const recipes = (productRecipes ?? []).filter(recipe => recipe.productId === product.id);
+    const optionRecipes = (productOptionRecipes ?? []).filter(recipe => selectedOptionIds.includes(recipe.optionId));
+
+    for (const recipe of recipes) {
+      usage.set(recipe.warehouseItemId, (usage.get(recipe.warehouseItemId) || 0) + recipe.quantity);
+    }
+    for (const recipe of optionRecipes) {
+      usage.set(recipe.warehouseItemId, (usage.get(recipe.warehouseItemId) || 0) + recipe.quantity);
+    }
+
+    if (usage.size === 0) {
+      return product.stock;
+    }
+
+    let minStock = Infinity;
+    for (const [warehouseItemId, quantity] of usage.entries()) {
+      if (quantity <= 0) continue;
+      const whItem = visibleWarehouseItems?.find(item => item.id === warehouseItemId);
+      if (!whItem) return 0;
+      const isResetToday = whItem.isDailyReset === 1 && whItem.lastPreparedDate !== todayStr;
+      const effectiveStock = isResetToday ? 0 : whItem.stock;
+      const available = Math.floor(effectiveStock / quantity);
+      if (available < minStock) {
+        minStock = available;
+      }
+    }
+
+    return minStock === Infinity ? 0 : minStock;
+  };
+
+  const getSelectionWithOption = (groupId: number, optionId: number, maxSelect: number) => {
+    const current = selectedOptionIds[groupId] ?? [];
+    if (current.includes(optionId)) {
+      return selectedOptionIds;
+    }
+
+    const nextGroupSelection = maxSelect <= 1
+      ? [optionId]
+      : [...current, optionId].slice(0, maxSelect);
+
+    return {
+      ...selectedOptionIds,
+      [groupId]: nextGroupSelection,
+    };
+  };
+
   const buildOptionSnapshots = (selection: Record<number, number[]>): CartOptionSnapshot[] => {
     const snapshots: CartOptionSnapshot[] = [];
     getSelectedOptionIds(selection).forEach(optionId => {
@@ -1448,14 +1497,19 @@ export default function Kasir() {
                     <div className="grid grid-cols-2 gap-2">
                       {getGroupOptions(group.id).map(option => {
                         const active = selected.includes(option.id!);
+                        const optionSelection = getSelectionWithOption(group.id!, option.id!, group.maxSelect);
+                        const optionStock = getAvailableStockForSelectionSync(optionProduct, optionSelection);
+                        const outOfStock = optionStock <= 0;
                         return (
                           <button
                             key={option.id}
                             type="button"
+                            disabled={outOfStock && !active}
                             onClick={() => toggleOptionSelection(group.id!, option.id!, group.maxSelect)}
                             className={cn(
                               'text-left p-3 rounded-xl border transition-colors min-h-[68px]',
-                              active ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-muted/30 text-foreground'
+                              active ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-muted/30 text-foreground',
+                              outOfStock && !active && 'opacity-55 cursor-not-allowed'
                             )}
                           >
                             <span className="block text-sm font-semibold leading-tight">{option.name}</span>
@@ -1465,8 +1519,14 @@ export default function Kasir() {
                                 : option.priceDelta > 0
                                   ? `+${rp(option.priceDelta)}`
                                   : option.priceDelta < 0
-                                    ? `-${rp(Math.abs(option.priceDelta))}`
+                                  ? `-${rp(Math.abs(option.priceDelta))}`
                                     : 'Tanpa tambahan'}
+                            </span>
+                            <span className={cn(
+                              'block text-[11px] mt-1 font-medium',
+                              outOfStock ? 'text-destructive' : 'text-emerald-600'
+                            )}>
+                              {outOfStock ? 'Stok habis' : `Stok tersedia: ${optionStock} ${optionProduct.unit}`}
                             </span>
                           </button>
                         );
