@@ -220,6 +220,7 @@ export interface ProductOptionGroup {
   required: number;
   minSelect: number;
   maxSelect: number;
+  pricingMode?: 'add' | 'override';
   sortOrder: number;
   isDeleted: number;
   createdAt: Date;
@@ -249,6 +250,7 @@ export interface ProductOptionRecipe {
 export interface CartOptionSnapshot {
   groupId: number;
   groupName: string;
+  groupPricingMode?: 'add' | 'override';
   optionId: number;
   optionName: string;
   priceDelta: number;
@@ -260,6 +262,25 @@ export interface DailyPrepFormula {
   prepItemId: number;    // ID of the item being prepared (e.g. Ayam Potong 9)
   targetItemId: number;  // ID of the target warehouse item (e.g. Dada)
   factor: number;        // Quantity added per 1 unit of prepItem
+}
+
+export function getActiveDailyPrepFormulas(
+  formulas: DailyPrepFormula[] = [],
+  warehouseItems: WarehouseItem[] = []
+) {
+  return formulas.filter(formula =>
+    warehouseItems.some(item => item.id === formula.prepItemId) &&
+    warehouseItems.some(item => item.id === formula.targetItemId)
+  );
+}
+
+export function getMainDailyPrepItems(
+  warehouseItems: WarehouseItem[] = [],
+  formulas: DailyPrepFormula[] = []
+) {
+  const activeFormulas = getActiveDailyPrepFormulas(formulas, warehouseItems);
+  const targetItemIds = new Set(activeFormulas.map(formula => formula.targetItemId));
+  return warehouseItems.filter(item => item.isDailyReset === 1 && !targetItemIds.has(item.id!));
 }
 
 // === Database ===
@@ -653,6 +674,49 @@ class PosDatabase extends Dexie {
       productOptions: '++id, groupId, isDeleted, [groupId+sortOrder]',
       productOptionRecipes: '++id, optionId, warehouseItemId, [optionId+warehouseItemId]',
     });
+
+    this.version(13).stores({
+      categories:       '++id, name, isDeleted',
+      products:         '++id, name, &sku, categoryId, barcode, isDeleted, createdBy, updatedBy',
+      suppliers:        '++id, name, isDeleted',
+      stockIns:         '++id, productId, supplierId, date, createdBy',
+      stockOuts:        '++id, productId, date, createdBy',
+      hppHistory:       '++id, productId, date',
+      paymentMethods:   '++id, name, category',
+      transactions:     '++id, date, &receiptNumber, paymentMethodId, status, orderNumber, createdBy',
+      transactionItems: '++id, transactionId, productId, stockKey',
+      storeSettings:    '++id',
+      units:            '++id, &name, isDeleted',
+      users:            '++id, &username, role, isActive',
+      warehouseItems:   '++id, name, isDeleted, isCashierVisible, isDailyReset',
+      productRecipes:   '++id, productId, warehouseItemId, [productId+warehouseItemId]',
+      dailyPrepFormulas: '++id, prepItemId, targetItemId, [prepItemId+targetItemId]',
+      productOptionGroups: '++id, productId, isDeleted, [productId+sortOrder]',
+      productOptions: '++id, groupId, isDeleted, [groupId+sortOrder]',
+      productOptionRecipes: '++id, optionId, warehouseItemId, [optionId+warehouseItemId]',
+    }).upgrade(async (tx) => {
+      const groupTable = tx.table('productOptionGroups');
+      const productTable = tx.table('products');
+      const optionTable = tx.table('productOptions');
+      const products = await productTable.toArray();
+      const options = await optionTable.toArray();
+      const productById = new Map(products.map((product: any) => [product.id, product]));
+
+      await groupTable.toCollection().modify((group: any) => {
+        if (group.pricingMode) return;
+
+        const groupOptions = options.filter((option: any) => option.groupId === group.id && option.isDeleted !== 1);
+        const product = productById.get(group.productId);
+        const looksLikePackagePriceSelector =
+          (product?.price ?? 0) === 0 &&
+          group.required === 1 &&
+          group.maxSelect === 1 &&
+          groupOptions.length > 0 &&
+          groupOptions.every((option: any) => (option.priceDelta ?? 0) > 0);
+
+        group.pricingMode = looksLikePackagePriceSelector ? 'override' : 'add';
+      });
+    });
   }
 }
 
@@ -697,6 +761,58 @@ export async function getProductOptionConfig(productId: number) {
       .sort((a, b) => a.sortOrder - b.sortOrder)
     : [];
   return { groups, options };
+}
+
+export function getSelectedOptionIds(selection: Record<number, number[]>) {
+  return Object.values(selection).flat().filter(Boolean);
+}
+
+export function getDefaultOptionSelection(
+  productId?: number,
+  groups: ProductOptionGroup[] = [],
+  options: ProductOption[] = []
+) {
+  if (!productId) return {};
+
+  const selection: Record<number, number[]> = {};
+  const productGroups = groups
+    .filter(group => group.productId === productId && group.isDeleted === 0)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  for (const group of productGroups) {
+    const groupOptions = options
+      .filter(option => option.groupId === group.id && option.isDeleted === 0)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const defaults = groupOptions
+      .filter(option => option.isDefault === 1)
+      .map(option => option.id!)
+      .filter(Boolean);
+
+    if (defaults.length > 0) {
+      selection[group.id!] = defaults.slice(0, Math.max(1, group.maxSelect || 1));
+      continue;
+    }
+
+    if (group.required === 1) {
+      selection[group.id!] = groupOptions
+        .slice(0, Math.max(1, group.minSelect || 1))
+        .map(option => option.id!)
+        .filter(Boolean);
+      continue;
+    }
+
+    selection[group.id!] = [];
+  }
+
+  return selection;
+}
+
+export function getDefaultOptionIdsForProduct(
+  productId?: number,
+  groups: ProductOptionGroup[] = [],
+  options: ProductOption[] = []
+) {
+  return getSelectedOptionIds(getDefaultOptionSelection(productId, groups, options));
 }
 
 export function buildStockKey(productId: number, selectedOptionIds: number[] = []) {

@@ -1,9 +1,9 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Product, type Category, type Transaction, type TransactionItemRecord, type CartOptionSnapshot, adjustConfiguredStock, buildStockKey, getAvailableStockForSelection, getConfiguredProductReceiptDetails } from '@/lib/db';
+import { db, type Product, type Category, type Transaction, type TransactionItemRecord, type CartOptionSnapshot, adjustConfiguredStock, buildStockKey, getAvailableStockForSelection, getConfiguredProductReceiptDetails, getActiveDailyPrepFormulas, getMainDailyPrepItems, getDefaultOptionSelection, getSelectedOptionIds } from '@/lib/db';
 import { useState, useRef, useEffect } from 'react';
-import { Search, Plus, Minus, ShoppingCart, X, Percent, Tag, CreditCard, Banknote, Check, Package as PackageIcon, Pencil, User, Hash, Utensils, ShoppingBag } from 'lucide-react';
+import { Search, Plus, Minus, ShoppingCart, X, Percent, Tag, CreditCard, Banknote, Check, Package as PackageIcon, Pencil, User, Hash, Utensils, ShoppingBag, Warehouse } from 'lucide-react';
 import Receipt from '@/components/Receipt';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -30,6 +30,7 @@ interface CartItem {
 
 export default function Kasir() {
   const { currentUser, can } = useAuth();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const editTxIdParam = searchParams.get('editTxId');
 
@@ -74,7 +75,6 @@ export default function Kasir() {
   const products = useLiveQuery(() => db.products.where('isDeleted').equals(0).toArray());
   const categories = useLiveQuery(() => db.categories.where('isDeleted').equals(0).toArray());
   const visibleWarehouseItems = useLiveQuery(() => db.warehouseItems.where('isDeleted').equals(0).toArray());
-  const chickenItems = useLiveQuery(() => db.warehouseItems.where('isDailyReset').equals(1).toArray());
   const dailyPrepFormulas = useLiveQuery(() => db.dailyPrepFormulas.toArray());
   const paymentMethods = useLiveQuery(() => db.paymentMethods.toArray());
   const storeSettings = useLiveQuery(() => db.storeSettings.toCollection().first());
@@ -82,6 +82,7 @@ export default function Kasir() {
   const productRecipes = useLiveQuery(() => db.productRecipes.toArray());
   const productOptionGroups = useLiveQuery(() => db.productOptionGroups.toArray());
   const productOptions = useLiveQuery(() => db.productOptions.toArray());
+  const productOptionRecipes = useLiveQuery(() => db.productOptionRecipes.toArray());
 
   // Permission gate — kept render-side (not redirect) so the bottom nav stays
   // intact. All hooks above run unconditionally; we just swap the rendered tree.
@@ -95,34 +96,52 @@ export default function Kasir() {
     .filter(option => option.groupId === groupId && option.isDeleted === 0)
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
-  const getDefaultOptionSelection = (product: Product) => {
-    const selection: Record<number, number[]> = {};
-    getProductGroups(product.id).forEach(group => {
-      const options = getGroupOptions(group.id);
-      const defaults = options.filter(option => option.isDefault === 1).map(option => option.id!).filter(Boolean);
-      if (defaults.length > 0) {
-        selection[group.id!] = defaults.slice(0, group.maxSelect);
-      } else if (group.required === 1 && options[0]?.id) {
-        selection[group.id!] = [options[0].id];
-      } else {
-        selection[group.id!] = [];
-      }
-    });
-    return selection;
-  };
+  const getDefaultSelectionForProduct = (product: Product) =>
+    getDefaultOptionSelection(product.id, productOptionGroups ?? [], productOptions ?? []);
 
-  const getSelectionOptionIds = (selection: Record<number, number[]>) =>
-    Object.values(selection).flat().filter(Boolean);
+  const getDisplayStockForProduct = (product: Product) => {
+    const selectedOptionIds = getSelectedOptionIds(getDefaultSelectionForProduct(product));
+    const usage = new Map<number, number>();
+    const recipes = (productRecipes ?? []).filter(recipe => recipe.productId === product.id);
+    const optionRecipes = (productOptionRecipes ?? []).filter(recipe => selectedOptionIds.includes(recipe.optionId));
+
+    for (const recipe of recipes) {
+      usage.set(recipe.warehouseItemId, (usage.get(recipe.warehouseItemId) || 0) + recipe.quantity);
+    }
+    for (const recipe of optionRecipes) {
+      usage.set(recipe.warehouseItemId, (usage.get(recipe.warehouseItemId) || 0) + recipe.quantity);
+    }
+
+    if (usage.size === 0) {
+      return product.stock;
+    }
+
+    let minStock = Infinity;
+    for (const [warehouseItemId, quantity] of usage.entries()) {
+      if (quantity <= 0) continue;
+      const whItem = visibleWarehouseItems?.find(item => item.id === warehouseItemId);
+      if (!whItem) return 0;
+      const isResetToday = whItem.isDailyReset === 1 && whItem.lastPreparedDate !== todayStr;
+      const effectiveStock = isResetToday ? 0 : whItem.stock;
+      const available = Math.floor(effectiveStock / quantity);
+      if (available < minStock) {
+        minStock = available;
+      }
+    }
+
+    return minStock === Infinity ? 0 : minStock;
+  };
 
   const buildOptionSnapshots = (selection: Record<number, number[]>): CartOptionSnapshot[] => {
     const snapshots: CartOptionSnapshot[] = [];
-    getSelectionOptionIds(selection).forEach(optionId => {
+    getSelectedOptionIds(selection).forEach(optionId => {
       const option = productOptions?.find(o => o.id === optionId);
       const group = option ? productOptionGroups?.find(g => g.id === option.groupId) : undefined;
       if (!option || !group) return;
       snapshots.push({
         groupId: group.id!,
         groupName: group.name,
+        groupPricingMode: group.pricingMode || 'add',
         optionId: option.id!,
         optionName: option.name,
         priceDelta: option.priceDelta || 0,
@@ -134,13 +153,19 @@ export default function Kasir() {
 
   const getConfiguredProduct = (product: Product, selectedOptions: CartOptionSnapshot[]) => {
     const optionLabel = selectedOptions.map(option => option.optionName).join(' / ');
-    const priceDelta = selectedOptions.reduce((sum, option) => sum + option.priceDelta, 0);
-    const hppDelta = selectedOptions.reduce((sum, option) => sum + option.hppDelta, 0);
+    const overrideOptions = selectedOptions.filter(option => option.groupPricingMode === 'override');
+    const additiveOptions = selectedOptions.filter(option => option.groupPricingMode !== 'override');
+    const priceDelta = additiveOptions.reduce((sum, option) => sum + option.priceDelta, 0);
+    const hppDelta = additiveOptions.reduce((sum, option) => sum + option.hppDelta, 0);
+    const overridePrice = overrideOptions.reduce((sum, option) => sum + option.priceDelta, 0);
+    const overrideHpp = overrideOptions.reduce((sum, option) => sum + option.hppDelta, 0);
+    const basePrice = overrideOptions.length > 0 ? overridePrice : product.price;
+    const baseHpp = overrideOptions.length > 0 ? overrideHpp : product.hpp;
     return {
       ...product,
       name: optionLabel ? `${product.name} - ${optionLabel}` : product.name,
-      price: product.price + priceDelta,
-      hpp: product.hpp + hppDelta,
+      price: basePrice + priceDelta,
+      hpp: baseHpp + hppDelta,
     };
   };
 
@@ -266,12 +291,8 @@ export default function Kasir() {
   }, [editTxIdParam]);
 
   const todayStr = new Date().toLocaleDateString('en-CA');
-  const activeDailyPrepFormulas = (dailyPrepFormulas ?? []).filter(formula =>
-    visibleWarehouseItems?.some(item => item.id === formula.prepItemId) &&
-    visibleWarehouseItems?.some(item => item.id === formula.targetItemId)
-  );
-  const prepTargetItemIds = new Set(activeDailyPrepFormulas.map(formula => formula.targetItemId));
-  const mainPrepItems = (chickenItems ?? []).filter(item => !prepTargetItemIds.has(item.id!));
+  const activeDailyPrepFormulas = getActiveDailyPrepFormulas(dailyPrepFormulas ?? [], visibleWarehouseItems ?? []);
+  const mainPrepItems = getMainDailyPrepItems(visibleWarehouseItems ?? [], activeDailyPrepFormulas);
   const needsPrep = mainPrepItems.length > 0 && mainPrepItems.some(item => item.lastPreparedDate !== todayStr);
 
   useEffect(() => {
@@ -412,29 +433,10 @@ export default function Kasir() {
 
   const allAvailableProducts = [
     ...(products ?? []).map(p => {
-      const recipes = productRecipes?.filter(r => r.productId === p.id) ?? [];
-      if (recipes.length > 0) {
-        let minStock = Infinity;
-        const todayStr = new Date().toLocaleDateString('en-CA');
-        for (const recipe of recipes) {
-          const whItem = visibleWarehouseItems?.find(wi => wi.id === recipe.warehouseItemId);
-          if (whItem) {
-            const isResetToday = whItem.isDailyReset === 1 && whItem.lastPreparedDate !== todayStr;
-            const effectiveStock = isResetToday ? 0 : whItem.stock;
-            const available = Math.floor(effectiveStock / recipe.quantity);
-            if (available < minStock) {
-              minStock = available;
-            }
-          } else {
-            minStock = 0;
-          }
-        }
-        return {
-          ...p,
-          stock: minStock === Infinity ? 0 : minStock
-        };
-      }
-      return p;
+      return {
+        ...p,
+        stock: getDisplayStockForProduct(p),
+      };
     }),
     ...virtualProducts
   ];
@@ -512,7 +514,7 @@ export default function Kasir() {
   const addToCart = (product: Product) => {
     const groups = getProductGroups(product.id);
     if (groups.length > 0) {
-      const selection = getDefaultOptionSelection(product);
+      const selection = getDefaultSelectionForProduct(product);
       setOptionProduct(product);
       setSelectedOptionIds(selection);
       return;
@@ -1351,7 +1353,13 @@ export default function Kasir() {
                           >
                             <span className="block text-sm font-semibold leading-tight">{option.name}</span>
                             <span className="block text-xs text-muted-foreground mt-1">
-                              {option.priceDelta > 0 ? `+${rp(option.priceDelta)}` : option.priceDelta < 0 ? `-${rp(Math.abs(option.priceDelta))}` : 'Tanpa tambahan'}
+                              {(group.pricingMode || 'add') === 'override'
+                                ? `Harga paket ${rp(option.priceDelta)}`
+                                : option.priceDelta > 0
+                                  ? `+${rp(option.priceDelta)}`
+                                  : option.priceDelta < 0
+                                    ? `-${rp(Math.abs(option.priceDelta))}`
+                                    : 'Tanpa tambahan'}
                             </span>
                           </button>
                         );
@@ -1710,6 +1718,21 @@ export default function Kasir() {
             <p className="text-sm text-muted-foreground">
               Masukkan jumlah untuk setiap bahan persiapan utama. Item turunan akan dihitung otomatis sesuai rumus yang sudah diset.
             </p>
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 text-xs gap-1.5"
+                onClick={() => {
+                  setPrepModalOpen(false);
+                  navigate('/warehouse?tab=daily');
+                }}
+              >
+                <Warehouse className="w-4 h-4" />
+                Buka Gudang & Resep
+              </Button>
+            </div>
             <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
               {mainPrepItems.map(item => {
                 const desiredQty = Math.max(0, parseInt(prepCounts[item.id!] || '0') || 0);

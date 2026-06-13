@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Product, type Category, type ProductOption, type ProductOptionGroup, autoLinkChickenRecipes, upsertProductOptionRecipe, duplicateProduct } from '@/lib/db';
+import { db, type Product, type Category, type ProductOption, type ProductOptionGroup, autoLinkChickenRecipes, upsertProductOptionRecipe, duplicateProduct, getDefaultOptionIdsForProduct } from '@/lib/db';
 import { useState, useRef } from 'react';
 import { Plus, Search, Edit2, Trash2, Package as PackageIcon, Camera, X, Settings2, Layers, Link as LinkIcon, Copy } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -50,6 +50,7 @@ export default function Produk() {
   const [groupRequired, setGroupRequired] = useState(true);
   const [groupMin, setGroupMin] = useState('1');
   const [groupMax, setGroupMax] = useState('1');
+  const [groupPricingMode, setGroupPricingMode] = useState<'add' | 'override'>('add');
   const [optionGroupId, setOptionGroupId] = useState('');
   const [optionName, setOptionName] = useState('');
   const [optionPriceDelta, setOptionPriceDelta] = useState('');
@@ -90,29 +91,10 @@ export default function Produk() {
   }) ?? [];
 
   const filtered = rawFiltered.map(p => {
-    const recipes = productRecipes?.filter(r => r.productId === p.id) ?? [];
-    if (recipes.length > 0) {
-      let minStock = Infinity;
-      const todayStr = new Date().toLocaleDateString('en-CA');
-      for (const recipe of recipes) {
-        const whItem = visibleWarehouseItems?.find(wi => wi.id === recipe.warehouseItemId);
-        if (whItem) {
-          const isResetToday = whItem.isDailyReset === 1 && whItem.lastPreparedDate !== todayStr;
-          const effectiveStock = isResetToday ? 0 : whItem.stock;
-          const available = Math.floor(effectiveStock / recipe.quantity);
-          if (available < minStock) {
-            minStock = available;
-          }
-        } else {
-          minStock = 0;
-        }
-      }
-      return {
-        ...p,
-        stock: minStock === Infinity ? 0 : minStock
-      };
-    }
-    return p;
+    return {
+      ...p,
+      stock: getDisplayStockForProduct(p),
+    };
   });
 
   const getCategoryName = (catId: number) => categories?.find(c => c.id === catId)?.name ?? '-';
@@ -128,6 +110,44 @@ export default function Produk() {
 
   const getOptionRecipes = (optionId?: number) => (productOptionRecipes ?? [])
     .filter(recipe => recipe.optionId === optionId);
+
+  const getDisplayStockForProduct = (product: Product) => {
+    const selectedOptionIds = getDefaultOptionIdsForProduct(
+      product.id,
+      productOptionGroups ?? [],
+      productOptions ?? []
+    );
+    const usage = new Map<number, number>();
+    const recipes = (productRecipes ?? []).filter(recipe => recipe.productId === product.id);
+    const optionRecipes = (productOptionRecipes ?? []).filter(recipe => selectedOptionIds.includes(recipe.optionId));
+
+    for (const recipe of recipes) {
+      usage.set(recipe.warehouseItemId, (usage.get(recipe.warehouseItemId) || 0) + recipe.quantity);
+    }
+    for (const recipe of optionRecipes) {
+      usage.set(recipe.warehouseItemId, (usage.get(recipe.warehouseItemId) || 0) + recipe.quantity);
+    }
+
+    if (usage.size === 0) {
+      return product.stock;
+    }
+
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    let minStock = Infinity;
+    for (const [warehouseItemId, quantity] of usage.entries()) {
+      if (quantity <= 0) continue;
+      const whItem = visibleWarehouseItems?.find(wi => wi.id === warehouseItemId);
+      if (!whItem) return 0;
+      const isResetToday = whItem.isDailyReset === 1 && whItem.lastPreparedDate !== todayStr;
+      const effectiveStock = isResetToday ? 0 : whItem.stock;
+      const available = Math.floor(effectiveStock / quantity);
+      if (available < minStock) {
+        minStock = available;
+      }
+    }
+
+    return minStock === Infinity ? 0 : minStock;
+  };
 
   const hasProductOptions = (productId?: number) => getProductGroups(productId).length > 0;
   const getProductOptionCount = (productId?: number) =>
@@ -244,6 +264,7 @@ export default function Produk() {
     setGroupRequired(true);
     setGroupMin('1');
     setGroupMax('1');
+    setGroupPricingMode((optionProduct.price || 0) === 0 ? 'override' : 'add');
     setOptionGroupDialog(true);
   };
 
@@ -253,6 +274,7 @@ export default function Produk() {
     setGroupRequired(group.required === 1);
     setGroupMin(String(group.minSelect));
     setGroupMax(String(group.maxSelect));
+    setGroupPricingMode(group.pricingMode || 'add');
     setOptionGroupDialog(true);
   };
 
@@ -268,6 +290,7 @@ export default function Produk() {
         required: groupRequired ? 1 : 0,
         minSelect: groupRequired ? Math.max(1, minSelect) : minSelect,
         maxSelect,
+        pricingMode: groupPricingMode,
         updatedAt: now,
       });
     } else {
@@ -278,6 +301,7 @@ export default function Produk() {
         required: groupRequired ? 1 : 0,
         minSelect: groupRequired ? Math.max(1, minSelect) : minSelect,
         maxSelect,
+        pricingMode: groupPricingMode,
         sortOrder,
         isDeleted: 0,
         createdAt: now,
@@ -865,6 +889,9 @@ export default function Produk() {
                               <Badge variant="outline" className="text-[10px]">
                                 {group.required ? 'Wajib' : 'Opsional'}
                               </Badge>
+                              <Badge variant="outline" className="text-[10px]">
+                                {(group.pricingMode || 'add') === 'override' ? 'Harga Paket' : 'Harga Tambahan'}
+                              </Badge>
                             </div>
                             <span className="text-[11px] text-muted-foreground">
                               pilih {group.minSelect}-{group.maxSelect}
@@ -898,6 +925,11 @@ export default function Produk() {
                           <p className="text-[11px] text-muted-foreground">
                             {group.required ? 'Wajib' : 'Opsional'} · pilih {group.minSelect}-{group.maxSelect}
                           </p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {(group.pricingMode || 'add') === 'override'
+                              ? 'Pilihan di grup ini menentukan harga final paket.'
+                              : 'Pilihan di grup ini menambah atau mengurangi harga dasar produk.'}
+                          </p>
                         </div>
                         <div className="flex gap-1">
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openGroupEdit(group)}>
@@ -921,7 +953,9 @@ export default function Produk() {
                                     {option.isDefault === 1 && <Badge className="h-4 text-[9px]">Default</Badge>}
                                   </div>
                                   <p className="text-[11px] text-muted-foreground">
-                                    +Rp {(option.priceDelta || 0).toLocaleString('id-ID')} · HPP +Rp {(option.hppDelta || 0).toLocaleString('id-ID')}
+                                    {(group.pricingMode || 'add') === 'override'
+                                      ? `Harga paket Rp ${(option.priceDelta || 0).toLocaleString('id-ID')} · HPP Rp ${(option.hppDelta || 0).toLocaleString('id-ID')}`
+                                      : `+Rp ${(option.priceDelta || 0).toLocaleString('id-ID')} · HPP +Rp ${(option.hppDelta || 0).toLocaleString('id-ID')}`}
                                   </p>
                                   <p className="text-[11px] text-muted-foreground mt-1">
                                     {getOptionRecipeSummary(option.id)}
@@ -982,6 +1016,21 @@ export default function Produk() {
               <span className="font-semibold">{groupRequired ? 'Wajib dipilih' : 'Opsional'}</span>
               <span className="block text-xs text-muted-foreground mt-0.5">Atur apakah kasir harus memilih isi paket dari grup ini.</span>
             </button>
+            <div className="space-y-1.5">
+              <Label>Mode Harga Grup</Label>
+              <Select value={groupPricingMode} onValueChange={(value: 'add' | 'override') => setGroupPricingMode(value)}>
+                <SelectTrigger className="h-11">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="add">Tambahkan ke harga produk</SelectItem>
+                  <SelectItem value="override">Opsi menentukan harga paket</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Gunakan <strong>Opsi menentukan harga paket</strong> untuk grup seperti potongan ayam, agar harga pilihan menjadi harga final paket dan tidak ditambah ke harga dasar produk.
+              </p>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Minimal Pilihan</Label>

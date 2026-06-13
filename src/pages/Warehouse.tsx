@@ -2,6 +2,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { 
   db, 
   ensureProductWarehouseLink, 
+  getActiveDailyPrepFormulas,
+  getMainDailyPrepItems,
   upsertDailyPrepFormula, 
   upsertProductRecipe, 
   repairInventoryAnomalies,
@@ -450,10 +452,7 @@ export default function WarehousePage() {
 
   const todayStr = new Date().toLocaleDateString('en-CA');
   const activeFormulas = useMemo(() => {
-    return formulas?.filter(f => 
-      warehouseItems?.some(item => item.id === f.prepItemId) &&
-      warehouseItems?.some(item => item.id === f.targetItemId)
-    ) || [];
+    return getActiveDailyPrepFormulas(formulas ?? [], warehouseItems ?? []);
   }, [formulas, warehouseItems]);
   
   // Calculate target item IDs from formulas to filter main list
@@ -463,10 +462,8 @@ export default function WarehousePage() {
 
   // Main prep items are those marked with isDailyReset === 1 and NOT a target of any formula
   const mainPrepItems = useMemo(() => {
-    return warehouseItems?.filter(item => 
-      item.isDailyReset === 1 && !targetItemIds.has(item.id!)
-    ) || [];
-  }, [warehouseItems, targetItemIds]);
+    return getMainDailyPrepItems(warehouseItems ?? [], formulas ?? []);
+  }, [warehouseItems, formulas]);
 
   const needsPrep = mainPrepItems.some(item => item.lastPreparedDate !== todayStr);
 

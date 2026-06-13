@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type TransactionItemRecord } from '@/lib/db';
 import { useState } from 'react';
-import { ShoppingCart, Package, BarChart3, TrendingUp, AlertTriangle, Receipt, ChevronRight, ClipboardList } from 'lucide-react';
+import { ShoppingCart, Package, BarChart3, TrendingUp, AlertTriangle, Receipt, ChevronRight, ClipboardList, Warehouse } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -145,6 +145,7 @@ export default function Dashboard() {
   const quickActions: { to: string; icon: typeof ShoppingCart; label: string; color: string; perm?: PermissionKey }[] = [
     { to: '/cashier', icon: ShoppingCart, label: 'Kasir', color: 'bg-primary/10 text-primary', perm: 'create_transaction' },
     { to: '/products', icon: Package, label: 'Produk', color: 'bg-accent/10 text-accent' },
+    { to: '/warehouse', icon: Warehouse, label: 'Gudang & Resep', color: 'bg-amber-100 text-amber-700' },
     { to: '/reports', icon: BarChart3, label: 'Laporan', color: 'bg-success/10 text-success', perm: 'view_reports' },
   ];
   const visibleActions = quickActions.filter((a) => !a.perm || can(a.perm));
@@ -216,7 +217,7 @@ export default function Dashboard() {
       {visibleActions.length > 0 && (
         <div>
           <h2 className="text-sm font-semibold text-muted-foreground mb-3">Akses Cepat</h2>
-          <div className={`grid gap-3 ${visibleActions.length === 1 ? 'grid-cols-1' : visibleActions.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+          <div className={`grid gap-3 ${visibleActions.length === 1 ? 'grid-cols-1' : visibleActions.length === 2 ? 'grid-cols-2' : visibleActions.length === 3 ? 'grid-cols-3' : 'grid-cols-2 md:grid-cols-4'}`}>
             {visibleActions.map(({ to, icon: Icon, label, color }) => (
               <Link key={to} to={to}>
                 <Card className="border-0 shadow-sm hover:shadow-md transition-shadow">

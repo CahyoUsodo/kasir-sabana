@@ -4,6 +4,7 @@ import {
   db,
   getAvailableStockForSelection,
   getConfiguredProductReceiptDetails,
+  getDefaultOptionIdsForProduct,
   getProductStockUsage,
 } from "@/lib/db";
 
@@ -242,5 +243,160 @@ describe("configured product stock", () => {
     await expect(
       getConfiguredProductReceiptDetails(productId, [sayapOptionId, sambalOptionId])
     ).resolves.toEqual(["Sayap", "Sambal Ijo", "Nasi"]);
+  });
+
+  it("uses required default package options when calculating display stock", async () => {
+    const now = new Date();
+
+    const riceId = await db.warehouseItems.add({
+      name: "Nasi",
+      stock: 20,
+      unit: "pcs",
+      isCashierVisible: 0,
+      price: 0,
+      isDailyReset: 0,
+      lastPreparedDate: "",
+      dailyPrepQty: 0,
+      dailyPrepFactor: 1,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const chickenId = await db.warehouseItems.add({
+      name: "Paha Ayam",
+      stock: 60,
+      unit: "pcs",
+      isCashierVisible: 0,
+      price: 0,
+      isDailyReset: 0,
+      lastPreparedDate: "",
+      dailyPrepQty: 0,
+      dailyPrepFactor: 1,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const drinkId = await db.warehouseItems.add({
+      name: "Fruit Tea",
+      stock: 25,
+      unit: "pcs",
+      isCashierVisible: 0,
+      price: 0,
+      isDailyReset: 0,
+      lastPreparedDate: "",
+      dailyPrepQty: 0,
+      dailyPrepFactor: 1,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const productId = await db.products.add({
+      name: "Paket Ayam Nasi",
+      sku: "PKT-003",
+      categoryId: 1,
+      price: 0,
+      hpp: 0,
+      stock: 999,
+      unit: "pcs",
+      description: "Paket ayam + nasi + minum",
+      isDeleted: 0,
+      deletedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.productRecipes.add({
+      productId,
+      warehouseItemId: riceId,
+      quantity: 1,
+    });
+
+    const cutGroupId = await db.productOptionGroups.add({
+      productId,
+      name: "Potongan Ayam",
+      required: 1,
+      minSelect: 1,
+      maxSelect: 1,
+      sortOrder: 1,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const extrasGroupId = await db.productOptionGroups.add({
+      productId,
+      name: "Isi Paket",
+      required: 1,
+      minSelect: 2,
+      maxSelect: 2,
+      sortOrder: 2,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const chickenOptionId = await db.productOptions.add({
+      groupId: cutGroupId,
+      name: "Paha",
+      priceDelta: 20000,
+      hppDelta: 0,
+      sortOrder: 1,
+      isDefault: 0,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const drinkOptionId = await db.productOptions.add({
+      groupId: extrasGroupId,
+      name: "Fruit Tea",
+      priceDelta: 0,
+      hppDelta: 0,
+      sortOrder: 1,
+      isDefault: 0,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const riceOptionId = await db.productOptions.add({
+      groupId: extrasGroupId,
+      name: "Nasi Tambahan Paket",
+      priceDelta: 0,
+      hppDelta: 0,
+      sortOrder: 2,
+      isDefault: 0,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.productOptionRecipes.bulkAdd([
+      {
+        optionId: chickenOptionId,
+        warehouseItemId: chickenId,
+        quantity: 1,
+      },
+      {
+        optionId: drinkOptionId,
+        warehouseItemId: drinkId,
+        quantity: 1,
+      },
+      {
+        optionId: riceOptionId,
+        warehouseItemId: riceId,
+        quantity: 0,
+      },
+    ]);
+
+    const groups = await db.productOptionGroups.toArray();
+    const options = await db.productOptions.toArray();
+    const defaultOptionIds = getDefaultOptionIdsForProduct(productId, groups, options);
+
+    expect(defaultOptionIds).toEqual([chickenOptionId, drinkOptionId, riceOptionId]);
+    await expect(getAvailableStockForSelection(productId, defaultOptionIds)).resolves.toBe(20);
   });
 });
