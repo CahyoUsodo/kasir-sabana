@@ -208,10 +208,9 @@ export default function Kasir() {
   const getDefaultSelectionForProduct = (product: Product) =>
     getDefaultOptionSelection(product.id, productOptionGroups ?? [], productOptions ?? []);
 
-  const getDisplayStockForProduct = (product: Product) => {
-    const selectedOptionIds = getSelectedOptionIds(getDefaultSelectionForProduct(product));
+  const getWarehouseUsageForConfiguration = (productId?: number, selectedOptionIds: number[] = []) => {
     const usage = new Map<number, number>();
-    const recipes = (productRecipes ?? []).filter(recipe => recipe.productId === product.id);
+    const recipes = (productRecipes ?? []).filter(recipe => recipe.productId === productId);
     const optionRecipes = (productOptionRecipes ?? []).filter(recipe => selectedOptionIds.includes(recipe.optionId));
 
     for (const recipe of recipes) {
@@ -221,10 +220,50 @@ export default function Kasir() {
       usage.set(recipe.warehouseItemId, (usage.get(recipe.warehouseItemId) || 0) + recipe.quantity);
     }
 
-    if (usage.size === 0) {
-      return product.stock;
+    return usage;
+  };
+
+  const getReservedWarehouseUsageFromCart = (cartItems: CartItem[], excludedStockKey?: string) => {
+    const reservedUsage = new Map<number, number>();
+
+    for (const cartItem of cartItems) {
+      if (cartItem.stockKey === excludedStockKey) continue;
+
+      const usagePerUnit = getWarehouseUsageForConfiguration(
+        cartItem.product.id,
+        cartItem.selectedOptions.map(option => option.optionId)
+      );
+
+      for (const [warehouseItemId, quantity] of usagePerUnit.entries()) {
+        reservedUsage.set(
+          warehouseItemId,
+          (reservedUsage.get(warehouseItemId) || 0) + (quantity * cartItem.qty)
+        );
+      }
     }
 
+    return reservedUsage;
+  };
+
+  const getAvailableStockForSelectionSync = (
+    product: Product,
+    selection: Record<number, number[]>,
+    cartItems: CartItem[] = cart,
+    excludedStockKey?: string
+  ) => {
+    const selectedOptionIds = getSelectedOptionIds(selection);
+    const stockKey = buildStockKey(product.id!, selectedOptionIds);
+    const usage = getWarehouseUsageForConfiguration(product.id, selectedOptionIds);
+
+    if (usage.size === 0) {
+      const reservedQty = cartItems
+        .filter(item => item.stockKey === stockKey && item.stockKey !== excludedStockKey)
+        .reduce((sum, item) => sum + item.qty, 0);
+
+      return Math.max(0, product.stock - reservedQty);
+    }
+
+    const reservedUsage = getReservedWarehouseUsageFromCart(cartItems, excludedStockKey);
     let minStock = Infinity;
     for (const [warehouseItemId, quantity] of usage.entries()) {
       if (quantity <= 0) continue;
@@ -232,7 +271,8 @@ export default function Kasir() {
       if (!whItem) return 0;
       const isResetToday = whItem.isDailyReset === 1 && whItem.lastPreparedDate !== todayStr;
       const effectiveStock = isResetToday ? 0 : whItem.stock;
-      const available = Math.floor(effectiveStock / quantity);
+      const reserved = reservedUsage.get(warehouseItemId) || 0;
+      const available = Math.floor(Math.max(0, effectiveStock - reserved) / quantity);
       if (available < minStock) {
         minStock = available;
       }
@@ -241,37 +281,8 @@ export default function Kasir() {
     return minStock === Infinity ? 0 : minStock;
   };
 
-  const getAvailableStockForSelectionSync = (product: Product, selection: Record<number, number[]>) => {
-    const selectedOptionIds = getSelectedOptionIds(selection);
-    const usage = new Map<number, number>();
-    const recipes = (productRecipes ?? []).filter(recipe => recipe.productId === product.id);
-    const optionRecipes = (productOptionRecipes ?? []).filter(recipe => selectedOptionIds.includes(recipe.optionId));
-
-    for (const recipe of recipes) {
-      usage.set(recipe.warehouseItemId, (usage.get(recipe.warehouseItemId) || 0) + recipe.quantity);
-    }
-    for (const recipe of optionRecipes) {
-      usage.set(recipe.warehouseItemId, (usage.get(recipe.warehouseItemId) || 0) + recipe.quantity);
-    }
-
-    if (usage.size === 0) {
-      return product.stock;
-    }
-
-    let minStock = Infinity;
-    for (const [warehouseItemId, quantity] of usage.entries()) {
-      if (quantity <= 0) continue;
-      const whItem = visibleWarehouseItems?.find(item => item.id === warehouseItemId);
-      if (!whItem) return 0;
-      const isResetToday = whItem.isDailyReset === 1 && whItem.lastPreparedDate !== todayStr;
-      const effectiveStock = isResetToday ? 0 : whItem.stock;
-      const available = Math.floor(effectiveStock / quantity);
-      if (available < minStock) {
-        minStock = available;
-      }
-    }
-
-    return minStock === Infinity ? 0 : minStock;
+  const getDisplayStockForProduct = (product: Product) => {
+    return getAvailableStockForSelectionSync(product, getDefaultSelectionForProduct(product));
   };
 
   const getSelectionWithOption = (groupId: number, optionId: number, maxSelect: number) => {
@@ -307,6 +318,13 @@ export default function Kasir() {
       });
     });
     return snapshots;
+  };
+
+  const buildSelectionFromSnapshots = (selectedOptions: CartOptionSnapshot[]) => {
+    return selectedOptions.reduce<Record<number, number[]>>((selection, option) => {
+      selection[option.groupId] = [...(selection[option.groupId] ?? []), option.optionId];
+      return selection;
+    }, {});
   };
 
   const getConfiguredProduct = (product: Product, selectedOptions: CartOptionSnapshot[]) => {
@@ -634,15 +652,19 @@ export default function Kasir() {
   const addConfiguredToCart = async (product: Product, selectedOptions: CartOptionSnapshot[] = []) => {
     const selectedOptionIds = selectedOptions.map(option => option.optionId);
     const stockKey = buildStockKey(product.id!, selectedOptionIds);
-    const availableStock = product.id! < 0
-      ? product.stock
-      : await getAvailableStockForSelection(product.id!, selectedOptionIds);
-    const configuredProduct = {
-      ...getConfiguredProduct(product, selectedOptions),
-      stock: availableStock,
-    };
 
     setCart(prev => {
+      const availableStock = product.id! < 0
+        ? Math.max(0, product.stock - prev.filter(item => item.stockKey === stockKey).reduce((sum, item) => sum + item.qty, 0))
+        : getAvailableStockForSelectionSync(
+            product,
+            buildSelectionFromSnapshots(selectedOptions),
+            prev
+          );
+      const configuredProduct = {
+        ...getConfiguredProduct(product, selectedOptions),
+        stock: availableStock,
+      };
       const existing = prev.find(c => c.stockKey === stockKey);
       const origQty = originalQuantities[stockKey] || 0;
       const allowedStock = availableStock + origQty;
@@ -713,9 +735,13 @@ export default function Kasir() {
       const newQty = c.qty + delta;
       if (newQty <= 0) return c;
       const origQty = originalQuantities[stockKey] || 0;
-      const allowedStock = c.product.stock + origQty;
+      const selection = buildSelectionFromSnapshots(c.selectedOptions);
+      const availableStock = c.product.id! < 0
+        ? Math.max(0, c.product.stock - prev.filter(item => item.stockKey === stockKey && item.stockKey !== c.stockKey).reduce((sum, item) => sum + item.qty, 0))
+        : getAvailableStockForSelectionSync(c.product, selection, prev, stockKey);
+      const allowedStock = availableStock + c.qty + origQty;
       if (newQty > allowedStock) { toast.error('Stok tidak cukup'); return c; }
-      return { ...c, qty: newQty };
+      return { ...c, qty: newQty, product: { ...c.product, stock: availableStock } };
     }));
   };
 
