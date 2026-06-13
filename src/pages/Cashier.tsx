@@ -66,6 +66,8 @@ export default function Kasir() {
 
   const [editingItemNotes, setEditingItemNotes] = useState<string | null>(null);
   const [tempItemNotes, setTempItemNotes] = useState('');
+  const loadTransactionForEditingRef = useRef<((txId: number) => Promise<void>) | null>(null);
+  const doFullResetRef = useRef<(() => void) | null>(null);
 
   const [prepModalOpen, setPrepModalOpen] = useState(false);
   const [prepCounts, setPrepCounts] = useState<Record<number, string>>({});
@@ -432,19 +434,18 @@ export default function Kasir() {
       toast.error('Gagal memuat transaksi');
     }
   };
+  loadTransactionForEditingRef.current = loadTransactionForEditing;
 
   useEffect(() => {
     if (editTxIdParam) {
       const txId = Number(editTxIdParam);
       if (!isNaN(txId) && txId !== editingTxId) {
-        loadTransactionForEditing(txId);
+        void loadTransactionForEditingRef.current?.(txId);
       }
-    } else {
-      if (editingTxId !== null) {
-        doFullReset();
-      }
+    } else if (editingTxId !== null) {
+      doFullResetRef.current?.();
     }
-  }, [editTxIdParam]);
+  }, [editTxIdParam, editingTxId]);
 
   const todayStr = new Date().toLocaleDateString('en-CA');
   const activeDailyPrepFormulas = getActiveDailyPrepFormulas(dailyPrepFormulas ?? [], visibleWarehouseItems ?? []);
@@ -626,6 +627,7 @@ export default function Kasir() {
       setSearchParams({}, { replace: true });
     }
   };
+  doFullResetRef.current = doFullReset;
 
   // === Cart Operations ===
 

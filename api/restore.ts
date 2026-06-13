@@ -63,7 +63,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       fields: 'id,name,mimeType',
     });
     const mimeType = fileMeta.data.mimeType || '';
-    console.log('Restore: file mimeType =', mimeType, ', name =', fileMeta.data.name);
 
     // Step 2: Download content based on MIME type
     let rawContent = '';
@@ -76,7 +75,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Google Workspace file — must use export
       // Try text/plain for Docs, text/csv for Sheets
       const exportMime = isGoogleSheet ? 'text/csv' : 'text/plain';
-      console.log('Restore: exporting as', exportMime);
       const exportRes = await drive.files.export(
         { fileId, mimeType: exportMime },
         { responseType: 'text' }
@@ -105,8 +103,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       rawContent = rawContent.slice(1);
     }
 
-    console.log('Restore: rawContent length =', rawContent.length, ', first 200 chars =', rawContent.substring(0, 200));
-
     if (!rawContent) {
       return res.status(400).json({ error: 'File kosong. Pastikan file sudah pernah di-backup sebelumnya.' });
     }
@@ -117,7 +113,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (parseError: any) {
       return res.status(400).json({
         error: 'Isi file bukan format JSON yang valid. Kemungkinan file ini adalah Google Docs yang belum pernah di-backup. Lakukan Backup terlebih dahulu, lalu coba Restore lagi.',
-        detail: rawContent.substring(0, 300),
       });
     }
 

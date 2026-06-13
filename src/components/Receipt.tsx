@@ -1,7 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
-import html2canvas from 'html2canvas';
 import { Download, Share2, Printer, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -229,12 +228,13 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
     return () => {
       cancelled = true;
     };
-  }, [open, printableItemsKey]);
+  }, [open, printableItems, printableItemsKey]);
 
   const captureReceipt = async (): Promise<HTMLCanvasElement | null> => {
     if (!receiptRef.current) return null;
     setGenerating(true);
     try {
+      const { default: html2canvas } = await import('html2canvas');
       const canvas = await html2canvas(receiptRef.current, {
         backgroundColor: '#ffffff',
         scale: 2,

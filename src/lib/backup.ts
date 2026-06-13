@@ -1,6 +1,7 @@
 import { db } from './db';
 
 const VERCEL_BACKUP_BASE_URL = 'https://kasir-sabana.vercel.app';
+const BACKUP_SCHEMA_VERSION = 13;
 
 export interface BackupPayload {
   version: number;
@@ -49,7 +50,7 @@ export function resolveCloudApiUrl(path: '/api/backup' | '/api/restore') {
 
 export async function getBackupPayload(): Promise<BackupPayload> {
   return {
-    version: 6,
+    version: BACKUP_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
     categories: await db.categories.toArray(),
     products: await db.products.toArray(),

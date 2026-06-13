@@ -3,29 +3,30 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { checkVersion } from "@/lib/version-check";
 import { AuthProvider } from "@/hooks/use-auth";
 import AppLayout from "./components/layout/AppLayout";
-import Dashboard from "./pages/Dashboard";
-import Cashier from "./pages/Cashier";
-import Products from "./pages/Products";
-import Reports from "./pages/Reports";
-import Settings from "./pages/Settings";
-import SupplierPage from "./pages/Supplier";
-import StockInPage from "./pages/StockIn";
-import StockOutPage from "./pages/StockOut";
-import TransactionHistory from "./pages/TransactionHistory";
-import StockReport from "./pages/StockReport";
-import UsersPage from "./pages/Users";
-import WarehousePage from "./pages/Warehouse";
-import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
 import { useAutoBackup } from "@/hooks/useAutoBackup";
 
 import { db, repairInventoryAnomalies } from '@/lib/db';
+
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Cashier = lazy(() => import("./pages/Cashier"));
+const Products = lazy(() => import("./pages/Products"));
+const Reports = lazy(() => import("./pages/Reports"));
+const Settings = lazy(() => import("./pages/Settings"));
+const SupplierPage = lazy(() => import("./pages/Supplier"));
+const StockInPage = lazy(() => import("./pages/StockIn"));
+const StockOutPage = lazy(() => import("./pages/StockOut"));
+const TransactionHistory = lazy(() => import("./pages/TransactionHistory"));
+const StockReport = lazy(() => import("./pages/StockReport"));
+const UsersPage = lazy(() => import("./pages/Users"));
+const WarehousePage = lazy(() => import("./pages/Warehouse"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 const App = () => {
   useAutoBackup();
@@ -70,23 +71,25 @@ const App = () => {
         <Sonner />
         <BrowserRouter>
           <AuthProvider>
-            <Routes>
-              <Route element={<AppLayout />}>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/cashier" element={<Cashier />} />
-                <Route path="/products" element={<Products />} />
-                <Route path="/reports" element={<Reports />} />
-                <Route path="/settings" element={<Settings />} />
-                <Route path="/supplier" element={<SupplierPage />} />
-                <Route path="/stock-in" element={<StockInPage />} />
-                <Route path="/stock-out" element={<StockOutPage />} />
-                <Route path="/history" element={<TransactionHistory />} />
-                <Route path="/stock-report" element={<StockReport />} />
-                <Route path="/users" element={<UsersPage />} />
-                <Route path="/warehouse" element={<WarehousePage />} />
-              </Route>
-              <Route path="*" element={<NotFound />} />
-            </Routes>
+            <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-sm text-muted-foreground">Memuat aplikasi...</div>}>
+              <Routes>
+                <Route element={<AppLayout />}>
+                  <Route path="/" element={<Dashboard />} />
+                  <Route path="/cashier" element={<Cashier />} />
+                  <Route path="/products" element={<Products />} />
+                  <Route path="/reports" element={<Reports />} />
+                  <Route path="/settings" element={<Settings />} />
+                  <Route path="/supplier" element={<SupplierPage />} />
+                  <Route path="/stock-in" element={<StockInPage />} />
+                  <Route path="/stock-out" element={<StockOutPage />} />
+                  <Route path="/history" element={<TransactionHistory />} />
+                  <Route path="/stock-report" element={<StockReport />} />
+                  <Route path="/users" element={<UsersPage />} />
+                  <Route path="/warehouse" element={<WarehousePage />} />
+                </Route>
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Suspense>
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>

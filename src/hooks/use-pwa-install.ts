@@ -22,8 +22,7 @@ if (typeof window !== 'undefined') {
 function detectInstalled(): boolean {
   if (typeof window === 'undefined') return false;
   // iOS Safari home-screen launch
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if ((window.navigator as any).standalone) return true;
+  if ((window.navigator as Navigator & { standalone?: boolean }).standalone) return true;
   // Other browsers
   return window.matchMedia?.('(display-mode: standalone)').matches ?? false;
 }

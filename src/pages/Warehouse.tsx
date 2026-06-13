@@ -23,6 +23,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { 
   Select, 
   SelectContent, 
@@ -103,6 +104,7 @@ export default function WarehousePage() {
   const [isDailyReset, setIsDailyReset] = useState(false);
   const [dailyPrepFactor, setDailyPrepFactor] = useState('1');
   const [photo, setPhoto] = useState<string | undefined>(undefined);
+  const [deleteItemTarget, setDeleteItemTarget] = useState<number | null>(null);
   const [itemEditId, setItemEditId] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -209,13 +211,19 @@ export default function WarehousePage() {
       toast.error('Item output persiapan tidak bisa dihapus langsung. Hapus dulu dari rumus persiapan.');
       return;
     }
-    if (!confirm('Apakah Anda yakin ingin menghapus barang ini dari gudang? Resep yang terhubung dengannya akan tetap ada namun tidak berfungsi.')) return;
+    setDeleteItemTarget(id);
+  };
+
+  const confirmDeleteItem = async () => {
+    const id = deleteItemTarget;
+    if (!id) return;
     try {
       await db.warehouseItems.update(id, { isDeleted: 1, updatedAt: new Date() });
       await db.productRecipes.where('warehouseItemId').equals(id).delete();
       await db.dailyPrepFormulas.where('prepItemId').equals(id).delete();
       await db.dailyPrepFormulas.where('targetItemId').equals(id).delete();
       await repairInventoryAnomalies();
+      setDeleteItemTarget(null);
       toast.success('Barang gudang berhasil dihapus');
     } catch (err) {
       console.error(err);
@@ -1272,6 +1280,22 @@ export default function WarehousePage() {
           </div>
         </DialogContent>
       </Dialog>
+      <AlertDialog open={deleteItemTarget !== null} onOpenChange={(open) => { if (!open) setDeleteItemTarget(null); }}>
+        <AlertDialogContent className="max-w-[90vw] rounded-xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hapus Barang Gudang?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Resep yang terhubung dengan barang ini akan ikut terlepas dan stok otomatisnya tidak akan berfungsi sampai Anda menghubungkannya lagi.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteItem} className="bg-destructive text-destructive-foreground">
+              Hapus Barang
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

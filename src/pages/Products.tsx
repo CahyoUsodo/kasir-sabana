@@ -34,6 +34,8 @@ export default function Produk() {
   const [editingGroup, setEditingGroup] = useState<ProductOptionGroup | null>(null);
   const [editingOption, setEditingOption] = useState<ProductOption | null>(null);
   const [recipeOption, setRecipeOption] = useState<ProductOption | null>(null);
+  const [groupDeleteTarget, setGroupDeleteTarget] = useState<ProductOptionGroup | null>(null);
+  const [optionDeleteTarget, setOptionDeleteTarget] = useState<ProductOption | null>(null);
 
   // Form state
   const [name, setName] = useState('');
@@ -357,12 +359,19 @@ export default function Produk() {
   };
 
   const deleteOptionGroup = async (group: ProductOptionGroup) => {
-    if (!group.id || !confirm(`Hapus grup opsi "${group.name}"?`)) return;
+    if (!group.id) return;
+    setGroupDeleteTarget(group);
+  };
+
+  const confirmDeleteOptionGroup = async () => {
+    const group = groupDeleteTarget;
+    if (!group?.id) return;
     const optionIds = getGroupOptions(group.id).map(option => option.id!).filter(Boolean);
     await db.productOptionGroups.update(group.id, { isDeleted: 1, updatedAt: new Date() });
     for (const optionId of optionIds) {
       await db.productOptions.update(optionId, { isDeleted: 1, updatedAt: new Date() });
     }
+    setGroupDeleteTarget(null);
     toast.success('Grup opsi dihapus');
   };
 
@@ -424,9 +433,16 @@ export default function Produk() {
   };
 
   const deleteOption = async (option: ProductOption) => {
-    if (!option.id || !confirm(`Hapus opsi "${option.name}"?`)) return;
+    if (!option.id) return;
+    setOptionDeleteTarget(option);
+  };
+
+  const confirmDeleteOption = async () => {
+    const option = optionDeleteTarget;
+    if (!option?.id) return;
     await db.productOptions.update(option.id, { isDeleted: 1, updatedAt: new Date() });
     await db.productOptionRecipes.where('optionId').equals(option.id).delete();
+    setOptionDeleteTarget(null);
     toast.success('Opsi dihapus');
   };
 
@@ -1183,6 +1199,38 @@ export default function Produk() {
           <AlertDialogFooter>
             <AlertDialogCancel>Batal</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground">Hapus</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={!!groupDeleteTarget} onOpenChange={(open) => { if (!open) setGroupDeleteTarget(null); }}>
+        <AlertDialogContent className="max-w-[90vw] rounded-xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hapus Grup Opsi?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Grup opsi "{groupDeleteTarget?.name}" akan disembunyikan beserta semua opsi di dalamnya.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteOptionGroup} className="bg-destructive text-destructive-foreground">
+              Hapus Grup
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={!!optionDeleteTarget} onOpenChange={(open) => { if (!open) setOptionDeleteTarget(null); }}>
+        <AlertDialogContent className="max-w-[90vw] rounded-xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hapus Opsi?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Opsi "{optionDeleteTarget?.name}" akan dihapus dari grup paket ini.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteOption} className="bg-destructive text-destructive-foreground">
+              Hapus Opsi
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

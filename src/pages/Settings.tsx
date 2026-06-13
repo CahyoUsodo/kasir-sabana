@@ -105,6 +105,9 @@ export default function Pengaturan() {
 
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
+  const [restoreDriveConfirmOpen, setRestoreDriveConfirmOpen] = useState(false);
+  const [restoreFileConfirmOpen, setRestoreFileConfirmOpen] = useState(false);
+  const pendingImportDataRef = useRef<any | null>(null);
 
   // Security PIN states
   const [tempFileId, setTempFileId] = useState('');
@@ -136,6 +139,120 @@ export default function Pengaturan() {
     } else {
       action();
     }
+  };
+
+  const backupHasEssentialData = (data: any) =>
+    ['categories', 'products', 'suppliers', 'transactions', 'paymentMethods'].some(
+      key => Array.isArray(data[key]) && data[key].length > 0
+    );
+
+  const restoreBackupData = async (data: any) => {
+    await db.transaction('rw', [
+      db.categories,
+      db.products,
+      db.suppliers,
+      db.stockIns,
+      db.stockOuts,
+      db.hppHistory,
+      db.paymentMethods,
+      db.transactions,
+      db.transactionItems,
+      db.storeSettings,
+      db.users,
+      db.units,
+      db.warehouseItems,
+      db.productRecipes,
+      db.productOptionGroups,
+      db.productOptions,
+      db.productOptionRecipes,
+      db.dailyPrepFormulas,
+    ], async () => {
+      await db.categories.clear();
+      await db.products.clear();
+      await db.suppliers.clear();
+      await db.stockIns.clear();
+      await db.stockOuts.clear();
+      await db.hppHistory.clear();
+      await db.paymentMethods.clear();
+      await db.transactions.clear();
+      await db.transactionItems.clear();
+      await db.storeSettings.clear();
+      await db.users.clear();
+      await db.units.clear();
+      await db.warehouseItems.clear();
+      await db.productRecipes.clear();
+      await db.productOptionGroups.clear();
+      await db.productOptions.clear();
+      await db.productOptionRecipes.clear();
+      await db.dailyPrepFormulas.clear();
+
+      if (data.categories?.length) await db.categories.bulkAdd(data.categories);
+      if (data.products?.length) await db.products.bulkAdd(data.products);
+      if (data.suppliers?.length) await db.suppliers.bulkAdd(data.suppliers);
+      if (data.stockIns?.length) await db.stockIns.bulkAdd(data.stockIns);
+      if (data.stockOuts?.length) await db.stockOuts.bulkAdd(data.stockOuts);
+      if (data.hppHistory?.length) await db.hppHistory.bulkAdd(data.hppHistory);
+      if (data.paymentMethods?.length) await db.paymentMethods.bulkAdd(data.paymentMethods);
+      if (data.transactions?.length) await db.transactions.bulkAdd(data.transactions);
+      if (data.storeSettings?.length) await db.storeSettings.bulkAdd(data.storeSettings);
+      if (data.users?.length) await db.users.bulkAdd(data.users);
+      if (data.warehouseItems?.length) await db.warehouseItems.bulkAdd(data.warehouseItems);
+      if (data.productRecipes?.length) await db.productRecipes.bulkAdd(data.productRecipes);
+      if (data.productOptionGroups?.length) await db.productOptionGroups.bulkAdd(data.productOptionGroups);
+      if (data.productOptions?.length) await db.productOptions.bulkAdd(data.productOptions);
+      if (data.productOptionRecipes?.length) await db.productOptionRecipes.bulkAdd(data.productOptionRecipes);
+      if (data.dailyPrepFormulas?.length) await db.dailyPrepFormulas.bulkAdd(data.dailyPrepFormulas);
+
+      if (Array.isArray(data.units) && data.units.length > 0) {
+        await db.units.bulkAdd(data.units);
+      } else {
+        const now = new Date();
+        const defaults = ['pcs', 'kg', 'gram', 'liter', 'ml', 'porsi', 'cup', 'botol', 'bungkus'];
+        const seen = new Set<string>();
+        const toAdd: any[] = [];
+
+        for (const name of defaults) {
+          seen.add(name);
+          toAdd.push({ name, isDefault: 1, createdAt: now, isDeleted: 0, deletedAt: null });
+        }
+
+        if (Array.isArray(data.products)) {
+          for (const p of data.products) {
+            const unit = (p?.unit as string | undefined)?.trim();
+            if (!unit || seen.has(unit)) continue;
+            seen.add(unit);
+            toAdd.push({ name: unit, isDefault: 0, createdAt: now, isDeleted: 0, deletedAt: null });
+          }
+        }
+
+        if (toAdd.length > 0) {
+          await db.units.bulkAdd(toAdd);
+        }
+      }
+
+      if (data.transactionItems?.length) {
+        await db.transactionItems.bulkAdd(data.transactionItems);
+      } else if (data.version === 1 && data.transactions?.length) {
+        for (const transaction of data.transactions) {
+          if (!Array.isArray(transaction.items) || transaction.items.length === 0) continue;
+
+          const itemRecords = transaction.items.map((item: any) => ({
+            transactionId: transaction.id,
+            productId: item.productId,
+            productName: item.productName,
+            quantity: item.quantity,
+            price: item.price,
+            hpp: item.hpp,
+            discountType: item.discountType,
+            discountValue: item.discountValue,
+            discountAmount: item.discountAmount,
+            subtotal: item.subtotal,
+          }));
+
+          await db.transactionItems.bulkAdd(itemRecords);
+        }
+      }
+    });
   };
 
   const openPinSetup = () => {
@@ -289,12 +406,17 @@ export default function Pengaturan() {
       toast.error('Tidak ada koneksi internet');
       return;
     }
+    setRestoreDriveConfirmOpen(true);
+  };
 
-    // Confirm before restore
-    if (!confirm('Data yang ada sekarang akan diganti dengan data dari Google Drive. Lanjutkan?')) return;
-
+  const confirmRestoreFromDrive = () => {
     runWithPinGate(
       async () => {
+        const fileId = storeSettings?.googleDriveFileId;
+        if (!fileId || !fileId.trim()) {
+          toast.error('Masukkan Google Drive File ID terlebih dahulu');
+          return;
+        }
         setIsRestoring(true);
         try {
           const apiUrl = resolveCloudApiUrl('/api/restore');
@@ -321,140 +443,17 @@ export default function Pengaturan() {
             throw new Error('Data dari Google Drive tidak valid');
           }
 
-          // Validate at least 1 table has data
-          const hasSomeData = ['categories', 'products', 'suppliers', 'transactions', 'paymentMethods'].some(
-            key => Array.isArray(data[key]) && data[key].length > 0
-          );
-          if (!hasSomeData) { throw new Error('File backup tidak berisi data'); }
-
-          // Snapshot for rollback
-          const snapshot = {
-            categories: await db.categories.toArray(),
-            products: await db.products.toArray(),
-            suppliers: await db.suppliers.toArray(),
-            stockIns: await db.stockIns.toArray(),
-            stockOuts: await db.stockOuts.toArray(),
-            hppHistory: await db.hppHistory.toArray(),
-            paymentMethods: await db.paymentMethods.toArray(),
-            transactions: await db.transactions.toArray(),
-            transactionItems: await db.transactionItems.toArray(),
-            storeSettings: await db.storeSettings.toArray(),
-            users: await db.users.toArray(),
-            units: await db.units.toArray(),
-            warehouseItems: await db.warehouseItems.toArray(),
-            productRecipes: await db.productRecipes.toArray(),
-            productOptionGroups: await db.productOptionGroups.toArray(),
-            productOptions: await db.productOptions.toArray(),
-            productOptionRecipes: await db.productOptionRecipes.toArray(),
-            dailyPrepFormulas: await db.dailyPrepFormulas.toArray(),
-          };
-
-          try {
-            // Clear all tables
-            await db.categories.clear(); await db.products.clear(); await db.suppliers.clear();
-            await db.stockIns.clear(); await db.stockOuts.clear(); await db.hppHistory.clear();
-            await db.paymentMethods.clear(); await db.transactions.clear(); await db.transactionItems.clear();
-            await db.storeSettings.clear();
-            if (Array.isArray(data.users)) { await db.users.clear(); }
-            await db.units.clear();
-            await db.warehouseItems.clear();
-            await db.productRecipes.clear();
-            await db.productOptionGroups.clear();
-            await db.productOptions.clear();
-            await db.productOptionRecipes.clear();
-            await db.dailyPrepFormulas.clear();
-
-            // BulkAdd from downloaded data
-            if (data.categories?.length) await db.categories.bulkAdd(data.categories);
-            if (data.products?.length) await db.products.bulkAdd(data.products);
-            if (data.suppliers?.length) await db.suppliers.bulkAdd(data.suppliers);
-            if (data.stockIns?.length) await db.stockIns.bulkAdd(data.stockIns);
-            if (data.stockOuts?.length) await db.stockOuts.bulkAdd(data.stockOuts);
-            if (data.hppHistory?.length) await db.hppHistory.bulkAdd(data.hppHistory);
-            if (data.paymentMethods?.length) await db.paymentMethods.bulkAdd(data.paymentMethods);
-            if (data.transactions?.length) await db.transactions.bulkAdd(data.transactions);
-            if (data.storeSettings?.length) await db.storeSettings.bulkAdd(data.storeSettings);
-            if (data.users?.length) await db.users.bulkAdd(data.users);
-            if (data.warehouseItems?.length) await db.warehouseItems.bulkAdd(data.warehouseItems);
-            if (data.productRecipes?.length) await db.productRecipes.bulkAdd(data.productRecipes);
-            if (data.productOptionGroups?.length) await db.productOptionGroups.bulkAdd(data.productOptionGroups);
-            if (data.productOptions?.length) await db.productOptions.bulkAdd(data.productOptions);
-            if (data.productOptionRecipes?.length) await db.productOptionRecipes.bulkAdd(data.productOptionRecipes);
-            if (data.dailyPrepFormulas?.length) await db.dailyPrepFormulas.bulkAdd(data.dailyPrepFormulas);
-
-            if (Array.isArray(data.units) && data.units.length > 0) {
-              await db.units.bulkAdd(data.units);
-            } else {
-              const now = new Date();
-              const defaults = ['pcs', 'kg', 'gram', 'liter', 'ml', 'porsi', 'cup', 'botol', 'bungkus'];
-              const seen = new Set<string>();
-              const toAdd: any[] = [];
-              for (const name of defaults) { seen.add(name); toAdd.push({ name, isDefault: 1, createdAt: now, isDeleted: 0, deletedAt: null }); }
-              if (Array.isArray(data.products)) {
-                for (const p of data.products) {
-                  const u = (p?.unit as string | undefined)?.trim();
-                  if (!u || seen.has(u)) continue;
-                  seen.add(u); toAdd.push({ name: u, isDefault: 0, createdAt: now, isDeleted: 0, deletedAt: null });
-                }
-              }
-              if (toAdd.length) await db.units.bulkAdd(toAdd);
-            }
-
-            if (data.transactionItems?.length) {
-              await db.transactionItems.bulkAdd(data.transactionItems);
-            } else if (data.version === 1 && data.transactions?.length) {
-              for (const t of data.transactions) {
-                if (Array.isArray(t.items) && t.items.length > 0) {
-                  const records = t.items.map((item: any) => ({
-                    transactionId: t.id, productId: item.productId, productName: item.productName,
-                    quantity: item.quantity, price: item.price, hpp: item.hpp,
-                    discountType: item.discountType, discountValue: item.discountValue,
-                    discountAmount: item.discountAmount, subtotal: item.subtotal,
-                  }));
-                  await db.transactionItems.bulkAdd(records);
-                }
-              }
-            }
-
-            toast.success('Data berhasil di-restore dari Google Drive!');
-          } catch (importErr) {
-            // Rollback
-            try {
-              await db.categories.clear(); await db.products.clear(); await db.suppliers.clear();
-              await db.stockIns.clear(); await db.stockOuts.clear(); await db.hppHistory.clear();
-              await db.paymentMethods.clear(); await db.transactions.clear(); await db.transactionItems.clear();
-              await db.storeSettings.clear(); await db.users.clear(); await db.units.clear();
-              await db.warehouseItems.clear(); await db.productRecipes.clear();
-              await db.productOptionGroups.clear(); await db.productOptions.clear(); await db.productOptionRecipes.clear();
-              await db.dailyPrepFormulas.clear();
-
-              if (snapshot.categories.length) await db.categories.bulkAdd(snapshot.categories);
-              if (snapshot.products.length) await db.products.bulkAdd(snapshot.products);
-              if (snapshot.suppliers.length) await db.suppliers.bulkAdd(snapshot.suppliers);
-              if (snapshot.stockIns.length) await db.stockIns.bulkAdd(snapshot.stockIns);
-              if (snapshot.stockOuts.length) await db.stockOuts.bulkAdd(snapshot.stockOuts);
-              if (snapshot.hppHistory.length) await db.hppHistory.bulkAdd(snapshot.hppHistory);
-              if (snapshot.paymentMethods.length) await db.paymentMethods.bulkAdd(snapshot.paymentMethods);
-              if (snapshot.transactions.length) await db.transactions.bulkAdd(snapshot.transactions);
-              if (snapshot.transactionItems.length) await db.transactionItems.bulkAdd(snapshot.transactionItems);
-              if (snapshot.storeSettings.length) await db.storeSettings.bulkAdd(snapshot.storeSettings);
-              if (snapshot.users.length) await db.users.bulkAdd(snapshot.users);
-              if (snapshot.units.length) await db.units.bulkAdd(snapshot.units);
-              if (snapshot.warehouseItems.length) await db.warehouseItems.bulkAdd(snapshot.warehouseItems);
-              if (snapshot.productRecipes.length) await db.productRecipes.bulkAdd(snapshot.productRecipes);
-              if (snapshot.productOptionGroups.length) await db.productOptionGroups.bulkAdd(snapshot.productOptionGroups);
-              if (snapshot.productOptions.length) await db.productOptions.bulkAdd(snapshot.productOptions);
-              if (snapshot.productOptionRecipes.length) await db.productOptionRecipes.bulkAdd(snapshot.productOptionRecipes);
-              if (snapshot.dailyPrepFormulas.length) await db.dailyPrepFormulas.bulkAdd(snapshot.dailyPrepFormulas);
-              toast.error('Import gagal, data dikembalikan');
-            } catch {
-              toast.error('Import gagal dan rollback gagal.');
-            }
+          if (!backupHasEssentialData(data)) {
+            throw new Error('File backup tidak berisi data');
           }
+
+          await restoreBackupData(data);
+          toast.success('Data berhasil di-restore dari Google Drive!');
         } catch (error: any) {
           toast.error(error.message || 'Gagal restore dari Google Drive');
         } finally {
           setIsRestoring(false);
+          setRestoreDriveConfirmOpen(false);
         }
       },
       'Verifikasi PIN Restore GDrive',
@@ -671,172 +670,40 @@ export default function Pengaturan() {
         const data = reviveDates(JSON.parse(text));
         if (!data.version) { toast.error('File tidak valid'); return; }
 
-        // Validate at least 1 table has data
-        const hasSomeData = ['categories', 'products', 'suppliers', 'transactions', 'paymentMethods'].some(
-          key => Array.isArray(data[key]) && data[key].length > 0
-        );
-        if (!hasSomeData) { toast.error('File backup tidak berisi data'); return; }
+        if (!backupHasEssentialData(data)) { toast.error('File backup tidak berisi data'); return; }
 
-        // Ask for confirmation
-        if (!confirm('Data yang ada sekarang akan diganti dengan data dari file backup. Lanjutkan?')) return;
-
-        runWithPinGate(
-          async () => {
-            // Snapshot existing data before clearing
-            const snapshot = {
-              categories: await db.categories.toArray(),
-              products: await db.products.toArray(),
-              suppliers: await db.suppliers.toArray(),
-              stockIns: await db.stockIns.toArray(),
-              stockOuts: await db.stockOuts.toArray(),
-              hppHistory: await db.hppHistory.toArray(),
-              paymentMethods: await db.paymentMethods.toArray(),
-              transactions: await db.transactions.toArray(),
-              transactionItems: await db.transactionItems.toArray(),
-              storeSettings: await db.storeSettings.toArray(),
-              users: await db.users.toArray(),
-              units: await db.units.toArray(),
-              warehouseItems: await db.warehouseItems.toArray(),
-              productRecipes: await db.productRecipes.toArray(),
-              productOptionGroups: await db.productOptionGroups.toArray(),
-              productOptions: await db.productOptions.toArray(),
-              productOptionRecipes: await db.productOptionRecipes.toArray(),
-              dailyPrepFormulas: await db.dailyPrepFormulas.toArray(),
-            };
-
-            setIsRestoring(true);
-            try {
-              // Clear all tables
-              await db.categories.clear(); await db.products.clear(); await db.suppliers.clear();
-              await db.stockIns.clear(); await db.stockOuts.clear(); await db.hppHistory.clear();
-              await db.paymentMethods.clear(); await db.transactions.clear(); await db.transactionItems.clear();
-              await db.storeSettings.clear();
-              if (Array.isArray(data.users)) {
-                await db.users.clear();
-              }
-              await db.units.clear();
-              await db.warehouseItems.clear();
-              await db.productRecipes.clear();
-              await db.productOptionGroups.clear();
-              await db.productOptions.clear();
-              await db.productOptionRecipes.clear();
-              await db.dailyPrepFormulas.clear();
-
-              // BulkAdd from file
-              if (data.categories?.length) await db.categories.bulkAdd(data.categories);
-              if (data.products?.length) await db.products.bulkAdd(data.products);
-              if (data.suppliers?.length) await db.suppliers.bulkAdd(data.suppliers);
-              if (data.stockIns?.length) await db.stockIns.bulkAdd(data.stockIns);
-              if (data.stockOuts?.length) await db.stockOuts.bulkAdd(data.stockOuts);
-              if (data.hppHistory?.length) await db.hppHistory.bulkAdd(data.hppHistory);
-              if (data.paymentMethods?.length) await db.paymentMethods.bulkAdd(data.paymentMethods);
-              if (data.transactions?.length) await db.transactions.bulkAdd(data.transactions);
-              if (data.storeSettings?.length) await db.storeSettings.bulkAdd(data.storeSettings);
-              if (data.users?.length) await db.users.bulkAdd(data.users);
-              if (data.warehouseItems?.length) await db.warehouseItems.bulkAdd(data.warehouseItems);
-              if (data.productRecipes?.length) await db.productRecipes.bulkAdd(data.productRecipes);
-              if (data.productOptionGroups?.length) await db.productOptionGroups.bulkAdd(data.productOptionGroups);
-              if (data.productOptions?.length) await db.productOptions.bulkAdd(data.productOptions);
-              if (data.productOptionRecipes?.length) await db.productOptionRecipes.bulkAdd(data.productOptionRecipes);
-              if (data.dailyPrepFormulas?.length) await db.dailyPrepFormulas.bulkAdd(data.dailyPrepFormulas);
-
-              // Units (v3+ backup) or harvest from products (v1/v2 backup)
-              if (Array.isArray(data.units) && data.units.length > 0) {
-                await db.units.bulkAdd(data.units);
-              } else {
-                const now = new Date();
-                const defaults = ['pcs', 'kg', 'gram', 'liter', 'ml', 'porsi', 'cup', 'botol', 'bungkus'];
-                const seen = new Set<string>();
-                const toAdd: any[] = [];
-
-                for (const name of defaults) {
-                  seen.add(name);
-                  toAdd.push({ name, isDefault: 1, createdAt: now, isDeleted: 0, deletedAt: null });
-                }
-                if (Array.isArray(data.products)) {
-                  for (const p of data.products) {
-                    const u = (p?.unit as string | undefined)?.trim();
-                    if (!u || seen.has(u)) continue;
-                    seen.add(u);
-                    toAdd.push({ name: u, isDefault: 0, createdAt: now, isDeleted: 0, deletedAt: null });
-                  }
-                }
-                if (toAdd.length) await db.units.bulkAdd(toAdd);
-              }
-
-              // Handle transactionItems
-              if (data.transactionItems?.length) {
-                await db.transactionItems.bulkAdd(data.transactionItems);
-              } else if (data.version === 1 && data.transactions?.length) {
-                for (const t of data.transactions) {
-                  if (Array.isArray(t.items) && t.items.length > 0) {
-                    const records = t.items.map((item: any) => ({
-                      transactionId: t.id,
-                      productId: item.productId,
-                      productName: item.productName,
-                      quantity: item.quantity,
-                      price: item.price,
-                      hpp: item.hpp,
-                      discountType: item.discountType,
-                      discountValue: item.discountValue,
-                      discountAmount: item.discountAmount,
-                      subtotal: item.subtotal,
-                    }));
-                    await db.transactionItems.bulkAdd(records);
-                  }
-                }
-              }
-
-              toast.success('Data berhasil di-restore!');
-            } catch (importErr) {
-              // Rollback — restore from snapshot
-              try {
-                await db.categories.clear(); await db.products.clear(); await db.suppliers.clear();
-                await db.stockIns.clear(); await db.stockOuts.clear(); await db.hppHistory.clear();
-                await db.paymentMethods.clear(); await db.transactions.clear(); await db.transactionItems.clear();
-                await db.storeSettings.clear();
-                await db.users.clear();
-                await db.units.clear();
-                await db.warehouseItems.clear();
-                await db.productRecipes.clear();
-                await db.productOptionGroups.clear();
-                await db.productOptions.clear();
-                await db.productOptionRecipes.clear();
-                await db.dailyPrepFormulas.clear();
-
-                if (snapshot.categories.length) await db.categories.bulkAdd(snapshot.categories);
-                if (snapshot.products.length) await db.products.bulkAdd(snapshot.products);
-                if (snapshot.suppliers.length) await db.suppliers.bulkAdd(snapshot.suppliers);
-                if (snapshot.stockIns.length) await db.stockIns.bulkAdd(snapshot.stockIns);
-                if (snapshot.stockOuts.length) await db.stockOuts.bulkAdd(snapshot.stockOuts);
-                if (snapshot.hppHistory.length) await db.hppHistory.bulkAdd(snapshot.hppHistory);
-                if (snapshot.paymentMethods.length) await db.paymentMethods.bulkAdd(snapshot.paymentMethods);
-                if (snapshot.transactions.length) await db.transactions.bulkAdd(snapshot.transactions);
-                if (snapshot.transactionItems.length) await db.transactionItems.bulkAdd(snapshot.transactionItems);
-                if (snapshot.storeSettings.length) await db.storeSettings.bulkAdd(snapshot.storeSettings);
-                if (snapshot.users.length) await db.users.bulkAdd(snapshot.users);
-                if (snapshot.units.length) await db.units.bulkAdd(snapshot.units);
-                if (snapshot.warehouseItems.length) await db.warehouseItems.bulkAdd(snapshot.warehouseItems);
-                if (snapshot.productRecipes.length) await db.productRecipes.bulkAdd(snapshot.productRecipes);
-                if (snapshot.productOptionGroups.length) await db.productOptionGroups.bulkAdd(snapshot.productOptionGroups);
-                if (snapshot.productOptions.length) await db.productOptions.bulkAdd(snapshot.productOptions);
-                if (snapshot.productOptionRecipes.length) await db.productOptionRecipes.bulkAdd(snapshot.productOptionRecipes);
-                if (snapshot.dailyPrepFormulas.length) await db.dailyPrepFormulas.bulkAdd(snapshot.dailyPrepFormulas);
-
-                toast.error('Import gagal, data dikembalikan');
-              } catch {
-                toast.error('Import gagal dan rollback gagal. Coba restore dari file backup.');
-              }
-            } finally {
-              setIsRestoring(false);
-            }
-          },
-          'Verifikasi PIN Import',
-          'Masukkan PIN keamanan 6 angka untuk menyetujui restore data dari file.'
-        );
+        pendingImportDataRef.current = data;
+        setRestoreFileConfirmOpen(true);
       } catch { toast.error('Gagal membaca file'); }
     };
     input.click();
+  };
+
+  const confirmRestoreFromFile = () => {
+    const data = pendingImportDataRef.current;
+    if (!data) {
+      toast.error('Data backup tidak ditemukan');
+      setRestoreFileConfirmOpen(false);
+      return;
+    }
+
+    runWithPinGate(
+      async () => {
+        setIsRestoring(true);
+        try {
+          await restoreBackupData(data);
+          toast.success('Data berhasil di-restore!');
+        } catch (importErr: any) {
+          toast.error(importErr?.message || 'Import gagal');
+        } finally {
+          setIsRestoring(false);
+          setRestoreFileConfirmOpen(false);
+          pendingImportDataRef.current = null;
+        }
+      },
+      'Verifikasi PIN Import',
+      'Masukkan PIN keamanan 6 angka untuk menyetujui restore data dari file.'
+    );
   };
 
   const emojiOptions = ['📦', '🍕', '🥤', '🍜', '🧃', '🎽', '💊', '🧹', '📱', '🛒', '🎁', '✂️'];
@@ -1454,6 +1321,41 @@ export default function Pengaturan() {
           <AlertDialogFooter>
             <AlertDialogCancel>Batal</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDeleteUnit} className="bg-destructive text-destructive-foreground">Hapus</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={restoreDriveConfirmOpen} onOpenChange={setRestoreDriveConfirmOpen}>
+        <AlertDialogContent className="max-w-[90vw] rounded-xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restore dari Google Drive?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Data yang ada sekarang akan diganti dengan data dari Google Drive. Pastikan Anda sudah memilih file backup yang benar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRestoreFromDrive}>
+              Lanjut Restore
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={restoreFileConfirmOpen} onOpenChange={(open) => {
+        setRestoreFileConfirmOpen(open);
+        if (!open) pendingImportDataRef.current = null;
+      }}>
+        <AlertDialogContent className="max-w-[90vw] rounded-xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restore dari File Backup?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Data yang ada sekarang akan diganti dengan data dari file backup yang Anda pilih. Lanjutkan hanya jika file tersebut memang versi terbaru yang ingin dipakai.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRestoreFromFile}>
+              Lanjut Restore
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

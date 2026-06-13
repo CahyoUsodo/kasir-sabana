@@ -2,8 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type TransactionItemRecord } from '@/lib/db';
 import { useState } from 'react';
 import { BarChart3, TrendingUp, ShoppingCart, Package, DollarSign, ArrowDown, ArrowUp, Minus, Download } from 'lucide-react';
-import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
+import type { Border, Borders, Fill, Style } from 'exceljs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
@@ -202,6 +201,18 @@ export default function Laporan() {
   const exportToExcel = async () => {
     if (!transactions || transactions.length === 0) return;
 
+    const [{ default: ExcelJS }, { saveAs }] = await Promise.all([
+      import('exceljs'),
+      import('file-saver'),
+    ]);
+    const lightFill: Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
+    const subtotalFill: Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9E5E5' } };
+    const emphasizedFill: Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2D0D0' } };
+    const dateHeaderFill: Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2D0D0' } };
+    const strongRedFill: Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB42829' } };
+    const thinRedBorder: Partial<Border> = { style: 'thin', color: { argb: 'FFB42829' } };
+    const thinGrayBorder: Partial<Border> = { style: 'thin', color: { argb: 'FFE2E8F0' } };
+
     // Resolve payment method names
     const paymentMethods = await db.paymentMethods.toArray();
     const pmMap: Record<number, string> = {};
@@ -240,32 +251,29 @@ export default function Laporan() {
     wb.created = new Date();
 
     // Helper for styles
-    const headerStyle = {
+    const headerStyle: Partial<Style> = {
       font: { bold: true, color: { argb: 'FFFFFFFF' } },
-      fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB42829' } }, // Red theme
+      fill: strongRedFill,
       alignment: { vertical: 'middle', horizontal: 'center' },
       border: {
-        top: { style: 'thin', color: { argb: 'FFB42829' } },
-        left: { style: 'thin', color: { argb: 'FFB42829' } },
-        bottom: { style: 'thin', color: { argb: 'FFB42829' } },
-        right: { style: 'thin', color: { argb: 'FFB42829' } }
-      }
+        top: thinRedBorder,
+        left: thinRedBorder,
+        bottom: thinRedBorder,
+        right: thinRedBorder
+      } as Partial<Borders>
     };
     
-    const cellBorder = {
-      top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-      left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-      bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-      right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+    const cellBorder: Partial<Borders> = {
+      top: thinGrayBorder,
+      left: thinGrayBorder,
+      bottom: thinGrayBorder,
+      right: thinGrayBorder
     };
     
     // Currency format
     const currencyFormat = 'Rp #,##0';
     // Percentage format
     const percentFormat = '0.0%';
-    // Subtotal Fill
-    const subtotalFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFF9E5E5' } };
-
     // ============================================
     // SHEET 1: Ringkasan
     // ============================================
@@ -321,8 +329,7 @@ export default function Laporan() {
       wsRingkasan.getCell(cell).border = cellBorder;
       wsRingkasan.getCell(cell).alignment = { vertical: 'middle', horizontal: 'center' };
       if (cell.startsWith('K')) {
-        // @ts-ignore
-        wsRingkasan.getCell(cell).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
+        wsRingkasan.getCell(cell).fill = lightFill;
       }
     });
 
@@ -350,8 +357,7 @@ export default function Laporan() {
       const labelCell = wsRingkasan.getCell(`${startLetter}7`);
       labelCell.value = c.label;
       labelCell.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
-      // @ts-ignore
-      labelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB42829' } };
+      labelCell.fill = strongRedFill;
       labelCell.alignment = { horizontal: 'center', vertical: 'middle' };
       
       // Row 8-11 (Value)
@@ -374,7 +380,6 @@ export default function Laporan() {
     // Ringkasan Keuangan Table
     wsRingkasan.mergeCells('A13:F13');
     wsRingkasan.getCell('A13').value = 'RINGKASAN KEUANGAN';
-    // @ts-ignore
     wsRingkasan.getCell('A13').style = headerStyle;
     
     wsRingkasan.mergeCells('A14:C14'); wsRingkasan.getCell('A14').value = 'Keterangan';
@@ -393,15 +398,13 @@ export default function Laporan() {
       
       if (rRow % 2 !== 0) {
         ['A','D'].forEach(col => {
-          // @ts-ignore
-          wsRingkasan.getCell(`${col}${rRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9E5E5' } };
+          wsRingkasan.getCell(`${col}${rRow}`).fill = subtotalFill;
         });
       }
       if (c.label === 'Penjualan Bersih') {
         ['A','D'].forEach(col => {
           wsRingkasan.getCell(`${col}${rRow}`).font = { bold: true, color: { argb: 'FFB42829' } };
-          // @ts-ignore
-          wsRingkasan.getCell(`${col}${rRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2D0D0' } };
+          wsRingkasan.getCell(`${col}${rRow}`).fill = emphasizedFill;
         });
       }
       rRow++;
@@ -415,7 +418,6 @@ export default function Laporan() {
     // Metode Pembayaran Table (Skip Chart)
     wsRingkasan.mergeCells('H13:N13');
     wsRingkasan.getCell('H13').value = 'METODE PEMBAYARAN';
-    // @ts-ignore
     wsRingkasan.getCell('H13').style = headerStyle;
 
     wsRingkasan.mergeCells('H14:I14'); wsRingkasan.getCell('H14').value = 'Metode Pembayaran';
@@ -424,7 +426,6 @@ export default function Laporan() {
     wsRingkasan.mergeCells('M14:N14'); wsRingkasan.getCell('M14').value = 'Persentase';
     
     ['H14','J14','K14','M14'].forEach(c => { 
-      // @ts-ignore
       wsRingkasan.getCell(c).style = headerStyle; 
     });
 
@@ -463,8 +464,7 @@ export default function Laporan() {
     
     ['H','J','K','M'].forEach(col => {
       wsRingkasan.getCell(`${col}${pRow}`).font = { bold: true, color: { argb: 'FFB42829' } };
-      // @ts-ignore
-      wsRingkasan.getCell(`${col}${pRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9E5E5' } };
+      wsRingkasan.getCell(`${col}${pRow}`).fill = subtotalFill;
     });
 
     for(let i=14; i<=pRow; i++) {
@@ -491,7 +491,6 @@ export default function Laporan() {
     ];
 
     wsDetail.getRow(1).eachCell(cell => {
-      // @ts-ignore
       cell.style = headerStyle;
     });
 
@@ -558,7 +557,6 @@ export default function Laporan() {
     ];
 
     wsProduk.getRow(1).eachCell(cell => {
-      // @ts-ignore
       cell.style = headerStyle;
     });
 
@@ -614,7 +612,6 @@ export default function Laporan() {
     prodSubRow.eachCell(cell => {
       cell.border = cellBorder;
       cell.font = { bold: true };
-      // @ts-ignore
       cell.fill = subtotalFill;
     });
 
@@ -634,8 +631,7 @@ export default function Laporan() {
     prodGrandRow.eachCell(cell => {
       cell.border = cellBorder;
       cell.font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
-      // @ts-ignore
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB42829' } };
+      cell.fill = strongRedFill;
     });
 
     // ============================================
@@ -653,7 +649,6 @@ export default function Laporan() {
     ];
 
     wsHarian.getRow(1).eachCell(cell => {
-      // @ts-ignore
       cell.style = headerStyle;
     });
 
@@ -691,8 +686,6 @@ export default function Laporan() {
       return new Date(ya, ma - 1, da).getTime() - new Date(yb, mb - 1, db).getTime();
     });
 
-    const dateHeaderFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFF2D0D0' } };
-
     let grandQty = 0, grandRevenue = 0, grandHpp = 0, grandProfit = 0;
 
     sortedDates.forEach(dateKey => {
@@ -702,7 +695,6 @@ export default function Laporan() {
       const dateRow = wsHarian.addRow({ date: `📅 ${dateKey}`, name: '', qty: '', unit: '', gross: '', hpp: '', profit: '' });
       wsHarian.mergeCells(`A${dateRow.number}:G${dateRow.number}`);
       dateRow.getCell('A').font = { bold: true, size: 12, color: { argb: 'FFB42829' } };
-      // @ts-ignore
       dateRow.getCell('A').fill = dateHeaderFill;
       dateRow.getCell('A').alignment = { vertical: 'middle' };
       dateRow.height = 22;
@@ -740,7 +732,6 @@ export default function Laporan() {
       subRow.eachCell(cell => {
         cell.border = cellBorder;
         cell.font = { bold: true, color: { argb: 'FFB42829' } };
-        // @ts-ignore
         cell.fill = subtotalFill;
       });
 
@@ -757,7 +748,6 @@ export default function Laporan() {
         dayTotalRow.eachCell(cell => {
           cell.border = cellBorder;
           cell.font = { bold: true, color: { argb: 'FFB42829' } };
-          // @ts-ignore
           cell.fill = subtotalFill;
         });
       }
@@ -775,7 +765,6 @@ export default function Laporan() {
     grandSubRow.eachCell(cell => {
       cell.border = cellBorder;
       cell.font = { bold: true };
-      // @ts-ignore
       cell.fill = subtotalFill;
     });
 
@@ -791,8 +780,7 @@ export default function Laporan() {
     grandRow.eachCell(cell => {
       cell.border = cellBorder;
       cell.font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
-      // @ts-ignore
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB42829' } };
+      cell.fill = strongRedFill;
     });
 
     // ============================================
@@ -809,7 +797,6 @@ export default function Laporan() {
     ];
 
     wsStok.getRow(1).eachCell(cell => {
-      // @ts-ignore
       cell.style = headerStyle;
     });
 
