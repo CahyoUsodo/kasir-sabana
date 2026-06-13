@@ -14,19 +14,33 @@ import { useAutoBackup } from "@/hooks/useAutoBackup";
 
 import { db, repairInventoryAnomalies } from '@/lib/db';
 
-const Dashboard = lazy(() => import("./pages/Dashboard"));
-const Cashier = lazy(() => import("./pages/Cashier"));
-const Products = lazy(() => import("./pages/Products"));
-const Reports = lazy(() => import("./pages/Reports"));
-const Settings = lazy(() => import("./pages/Settings"));
-const SupplierPage = lazy(() => import("./pages/Supplier"));
-const StockInPage = lazy(() => import("./pages/StockIn"));
-const StockOutPage = lazy(() => import("./pages/StockOut"));
-const TransactionHistory = lazy(() => import("./pages/TransactionHistory"));
-const StockReport = lazy(() => import("./pages/StockReport"));
-const UsersPage = lazy(() => import("./pages/Users"));
-const WarehousePage = lazy(() => import("./pages/Warehouse"));
-const NotFound = lazy(() => import("./pages/NotFound"));
+const loadDashboard = () => import("./pages/Dashboard");
+const loadCashier = () => import("./pages/Cashier");
+const loadProducts = () => import("./pages/Products");
+const loadReports = () => import("./pages/Reports");
+const loadSettings = () => import("./pages/Settings");
+const loadSupplierPage = () => import("./pages/Supplier");
+const loadStockInPage = () => import("./pages/StockIn");
+const loadStockOutPage = () => import("./pages/StockOut");
+const loadTransactionHistory = () => import("./pages/TransactionHistory");
+const loadStockReport = () => import("./pages/StockReport");
+const loadUsersPage = () => import("./pages/Users");
+const loadWarehousePage = () => import("./pages/Warehouse");
+const loadNotFound = () => import("./pages/NotFound");
+
+const Dashboard = lazy(loadDashboard);
+const Cashier = lazy(loadCashier);
+const Products = lazy(loadProducts);
+const Reports = lazy(loadReports);
+const Settings = lazy(loadSettings);
+const SupplierPage = lazy(loadSupplierPage);
+const StockInPage = lazy(loadStockInPage);
+const StockOutPage = lazy(loadStockOutPage);
+const TransactionHistory = lazy(loadTransactionHistory);
+const StockReport = lazy(loadStockReport);
+const UsersPage = lazy(loadUsersPage);
+const WarehousePage = lazy(loadWarehousePage);
+const NotFound = lazy(loadNotFound);
 
 const App = () => {
   useAutoBackup();
@@ -62,6 +76,36 @@ const App = () => {
       }
     };
     fixStringDates();
+  }, []);
+
+  useEffect(() => {
+    const preloadPages = () => {
+      void Promise.allSettled([
+        loadCashier(),
+        loadProducts(),
+        loadReports(),
+        loadTransactionHistory(),
+        loadWarehousePage(),
+        loadSettings(),
+      ]);
+    };
+
+    const browserWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+
+    if (browserWindow.requestIdleCallback) {
+      const idleId = browserWindow.requestIdleCallback(preloadPages, { timeout: 1500 });
+      return () => {
+        browserWindow.cancelIdleCallback?.(idleId);
+      };
+    }
+
+    const timeoutId = window.setTimeout(preloadPages, 1200);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
   }, []);
 
   return (
