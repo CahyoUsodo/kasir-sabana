@@ -150,6 +150,7 @@ export interface TransactionItemRecord {
   productName: string;
   productBaseName?: string;
   selectedOptions?: CartOptionSnapshot[];
+  receiptDetails?: string[];
   stockKey?: string;
   quantity: number;
   price: number;
@@ -740,6 +741,54 @@ export async function getAvailableStockForSelection(productId: number, selectedO
   }
 
   return available === Infinity ? 0 : available;
+}
+
+export async function getConfiguredProductReceiptDetails(productId: number, selectedOptionIds: number[] = []) {
+  if (productId < 0) return [];
+
+  const details: string[] = [];
+  const seen = new Set<string>();
+  const pushUnique = (value?: string | null) => {
+    const normalized = value?.trim();
+    if (!normalized) return;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    details.push(normalized);
+  };
+
+  if (selectedOptionIds.length > 0) {
+    const options = await db.productOptions.where('id').anyOf(selectedOptionIds).toArray();
+    const groupIds = [...new Set(options.map(option => option.groupId).filter(Boolean))];
+    const groups = groupIds.length > 0
+      ? await db.productOptionGroups.where('id').anyOf(groupIds).toArray()
+      : [];
+    const groupSortOrder = new Map(groups.map(group => [group.id!, group.sortOrder]));
+
+    options
+      .filter(option => option.isDeleted === 0)
+      .sort((a, b) => {
+        const groupDiff = (groupSortOrder.get(a.groupId) ?? 0) - (groupSortOrder.get(b.groupId) ?? 0);
+        if (groupDiff !== 0) return groupDiff;
+        return a.sortOrder - b.sortOrder;
+      })
+      .forEach(option => pushUnique(option.name));
+  }
+
+  const productRecipes = await db.productRecipes.where('productId').equals(productId).toArray();
+  if (productRecipes.length > 0) {
+    const warehouseItemIds = [...new Set(productRecipes.map(recipe => recipe.warehouseItemId))];
+    const warehouseItems = warehouseItemIds.length > 0
+      ? await db.warehouseItems.where('id').anyOf(warehouseItemIds).toArray()
+      : [];
+    const warehouseNameById = new Map(warehouseItems.map(item => [item.id!, item.name]));
+
+    productRecipes.forEach(recipe => {
+      pushUnique(warehouseNameById.get(recipe.warehouseItemId));
+    });
+  }
+
+  return details;
 }
 
 export async function ensureProductWarehouseLink(product: Product) {

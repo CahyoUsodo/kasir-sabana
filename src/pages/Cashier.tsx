@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Product, type Category, type Transaction, type TransactionItemRecord, type CartOptionSnapshot, adjustConfiguredStock, buildStockKey, getAvailableStockForSelection } from '@/lib/db';
+import { db, type Product, type Category, type Transaction, type TransactionItemRecord, type CartOptionSnapshot, adjustConfiguredStock, buildStockKey, getAvailableStockForSelection, getConfiguredProductReceiptDetails } from '@/lib/db';
 import { useState, useRef, useEffect } from 'react';
 import { Search, Plus, Minus, ShoppingCart, X, Percent, Tag, CreditCard, Banknote, Check, Package as PackageIcon, Pencil, User, Hash, Utensils, ShoppingBag } from 'lucide-react';
 import Receipt from '@/components/Receipt';
@@ -666,22 +666,32 @@ export default function Kasir() {
       });
 
       await db.transactionItems.where('transactionId').equals(editingTxId).delete();
-      const itemRecords: TransactionItemRecord[] = cart.map(c => ({
-        transactionId: editingTxId,
-        productId: c.product.id!,
-        productName: c.product.name,
-        productBaseName: c.baseName,
-        selectedOptions: c.selectedOptions,
-        stockKey: c.stockKey,
-        quantity: c.qty,
-        price: c.product.price,
-        hpp: c.product.hpp,
-        discountType: c.discountType,
-        discountValue: c.discountValue,
-        discountAmount: getItemDiscountAmount(c),
-        subtotal: getItemSubtotal(c),
-        notes: c.notes,
-      }));
+      const itemRecords: TransactionItemRecord[] = [];
+      for (const cartItem of cart) {
+        const receiptDetails = cartItem.selectedOptions.length > 0
+          ? await getConfiguredProductReceiptDetails(
+              cartItem.product.id!,
+              cartItem.selectedOptions.map(option => option.optionId)
+            )
+          : [];
+        itemRecords.push({
+          transactionId: editingTxId,
+          productId: cartItem.product.id!,
+          productName: cartItem.product.name,
+          productBaseName: cartItem.baseName,
+          selectedOptions: cartItem.selectedOptions,
+          receiptDetails,
+          stockKey: cartItem.stockKey,
+          quantity: cartItem.qty,
+          price: cartItem.product.price,
+          hpp: cartItem.product.hpp,
+          discountType: cartItem.discountType,
+          discountValue: cartItem.discountValue,
+          discountAmount: getItemDiscountAmount(cartItem),
+          subtotal: getItemSubtotal(cartItem),
+          notes: cartItem.notes,
+        });
+      }
       await db.transactionItems.bulkAdd(itemRecords);
 
       // Adjust stock deltas safely by fetching fresh database stock
@@ -732,22 +742,32 @@ export default function Kasir() {
 
       const txId = await db.transactions.add(txData);
 
-      const itemRecords: TransactionItemRecord[] = cart.map(c => ({
-        transactionId: txId as number,
-        productId: c.product.id!,
-        productName: c.product.name,
-        productBaseName: c.baseName,
-        selectedOptions: c.selectedOptions,
-        stockKey: c.stockKey,
-        quantity: c.qty,
-        price: c.product.price,
-        hpp: c.product.hpp,
-        discountType: c.discountType,
-        discountValue: c.discountValue,
-        discountAmount: getItemDiscountAmount(c),
-        subtotal: getItemSubtotal(c),
-        notes: c.notes,
-      }));
+      const itemRecords: TransactionItemRecord[] = [];
+      for (const cartItem of cart) {
+        const receiptDetails = cartItem.selectedOptions.length > 0
+          ? await getConfiguredProductReceiptDetails(
+              cartItem.product.id!,
+              cartItem.selectedOptions.map(option => option.optionId)
+            )
+          : [];
+        itemRecords.push({
+          transactionId: txId as number,
+          productId: cartItem.product.id!,
+          productName: cartItem.product.name,
+          productBaseName: cartItem.baseName,
+          selectedOptions: cartItem.selectedOptions,
+          receiptDetails,
+          stockKey: cartItem.stockKey,
+          quantity: cartItem.qty,
+          price: cartItem.product.price,
+          hpp: cartItem.product.hpp,
+          discountType: cartItem.discountType,
+          discountValue: cartItem.discountValue,
+          discountAmount: getItemDiscountAmount(cartItem),
+          subtotal: getItemSubtotal(cartItem),
+          notes: cartItem.notes,
+        });
+      }
       await db.transactionItems.bulkAdd(itemRecords);
 
       for (const item of cart) {

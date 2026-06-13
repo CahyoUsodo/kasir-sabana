@@ -129,6 +129,26 @@ export default function Produk() {
   const getOptionRecipes = (optionId?: number) => (productOptionRecipes ?? [])
     .filter(recipe => recipe.optionId === optionId);
 
+  const hasProductOptions = (productId?: number) => getProductGroups(productId).length > 0;
+  const getProductOptionCount = (productId?: number) =>
+    getProductGroups(productId).reduce((total, group) => total + getGroupOptions(group.id).length, 0);
+  const getProductLinkedOptionCount = (productId?: number) =>
+    getProductGroups(productId).reduce(
+      (total, group) => total + getGroupOptions(group.id).filter(option => getOptionRecipes(option.id).length > 0).length,
+      0
+    );
+  const getGroupLinkedRecipeCount = (groupId?: number) =>
+    getGroupOptions(groupId).reduce((total, option) => total + getOptionRecipes(option.id).length, 0);
+  const getOptionRecipeSummary = (optionId?: number) => {
+    const recipes = getOptionRecipes(optionId);
+    if (recipes.length === 0) return 'Belum terhubung ke stok gudang';
+    if (recipes.length === 1) {
+      const recipe = recipes[0];
+      return `Mengurangi ${recipe.quantity} ${getWarehouseName(recipe.warehouseItemId)}`;
+    }
+    return `${recipes.length} bahan terhubung ke stok gudang`;
+  };
+
   const getWarehouseName = (warehouseItemId: number) => {
     const item = visibleWarehouseItems?.find(wi => wi.id === warehouseItemId);
     return item ? `${item.name} (${item.unit})` : `Bahan #${warehouseItemId}`;
@@ -527,6 +547,9 @@ export default function Produk() {
                 {(() => {
                   const recipeCount = getProductRecipeCount(p.id);
                   const hasRecipe = recipeCount > 0;
+                  const hasOptions = hasProductOptions(p.id);
+                  const optionGroupCount = getProductGroups(p.id).length;
+                  const optionCount = getProductOptionCount(p.id);
 
                   return (
                 <div className="flex items-start gap-3">
@@ -549,6 +572,11 @@ export default function Produk() {
                           Stok Otomatis
                         </Badge>
                       )}
+                      {hasOptions && (
+                        <Badge className="text-[10px] shrink-0 bg-sky-100 text-sky-700 hover:bg-sky-100">
+                          Paket/Opsi
+                        </Badge>
+                      )}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">SKU: {p.sku || '-'}</p>
                     {p.description && (
@@ -567,6 +595,11 @@ export default function Produk() {
                       {hasRecipe && (
                         <span className="text-[11px] text-muted-foreground">
                           {recipeCount} bahan resep
+                        </span>
+                      )}
+                      {hasOptions && (
+                        <span className="text-[11px] text-muted-foreground">
+                          {optionGroupCount} grup • {optionCount} opsi
                         </span>
                       )}
                     </div>
@@ -744,6 +777,19 @@ export default function Produk() {
               />
               <p className="text-[10px] text-muted-foreground text-right">{description.length}/500</p>
             </div>
+            <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-[11px] text-sky-900 space-y-2">
+              <p className="font-semibold">Produk paket dan produk ber-opsi diatur dari editor paket.</p>
+              <p>
+                Simpan produk dasar dulu, lalu susun grup seperti potongan ayam, pilihan sambal, atau tambahan nasi agar kasir bisa memilih kombinasi paket dengan benar.
+              </p>
+              {editProduct?.id ? (
+                <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => { setDialogOpen(false); setOptionProduct(editProduct); }}>
+                  Buka Editor Paket
+                </Button>
+              ) : (
+                <p className="text-[10px] text-sky-700">Tombol editor paket akan aktif setelah produk pertama kali disimpan.</p>
+              )}
+            </div>
             <Button className="w-full h-12 text-base font-semibold" onClick={handleSave} disabled={!name.trim() || !categoryId || !sku.trim()}>
               {editProduct ? 'Simpan Perubahan' : 'Tambah Produk'}
             </Button>
@@ -757,29 +803,95 @@ export default function Produk() {
       <Dialog open={!!optionProduct} onOpenChange={(open) => { if (!open) setOptionProduct(null); }}>
         <DialogContent className="max-w-[95vw] rounded-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Opsi Produk</DialogTitle>
+            <DialogTitle>Editor Paket & Opsi</DialogTitle>
           </DialogHeader>
           {optionProduct && (
             <div className="space-y-4 mt-2">
+              <div className="rounded-2xl border border-primary/15 bg-primary/5 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold truncate">{optionProduct.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Harga dasar Rp {optionProduct.price.toLocaleString('id-ID')} • SKU {optionProduct.sku}
+                    </p>
+                  </div>
+                  <Button size="sm" className="h-9 gap-1.5" onClick={openGroupAdd}>
+                    <Plus className="w-4 h-4" />
+                    Grup
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="rounded-xl bg-white/80 border p-2.5">
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Grup Opsi</p>
+                    <p className="text-lg font-bold">{getProductGroups(optionProduct.id).length}</p>
+                  </div>
+                  <div className="rounded-xl bg-white/80 border p-2.5">
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Total Opsi</p>
+                    <p className="text-lg font-bold">{getProductOptionCount(optionProduct.id)}</p>
+                  </div>
+                  <div className="rounded-xl bg-white/80 border p-2.5">
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Opsi ke Gudang</p>
+                    <p className="text-lg font-bold">{getProductLinkedOptionCount(optionProduct.id)}</p>
+                  </div>
+                </div>
+
+                <div className="text-[11px] text-muted-foreground leading-relaxed">
+                  Susun paket per grup. Contohnya: grup <strong>Potongan Ayam</strong> berisi <strong>Sayap</strong>, <strong>Paha Bawah</strong>, lalu grup <strong>Sambal</strong> berisi <strong>Sambal Ijo</strong> atau <strong>Geprek</strong>. Tiap opsi bisa dihubungkan ke stok gudang agar pengurangan stok mengikuti pilihan kasir.
+                </div>
+              </div>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold truncate">{optionProduct.name}</p>
-                  <p className="text-xs text-muted-foreground">Harga dasar Rp {optionProduct.price.toLocaleString('id-ID')}</p>
+                  <p className="text-sm font-semibold truncate">Struktur Paket Saat Ini</p>
+                  <p className="text-xs text-muted-foreground">Kelola grup pilihan, isi paket, dan kaitan stok per opsi.</p>
                 </div>
-                <Button size="sm" className="h-9 gap-1.5" onClick={openGroupAdd}>
-                  <Plus className="w-4 h-4" />
-                  Grup
-                </Button>
               </div>
 
               {getProductGroups(optionProduct.id).length === 0 ? (
-                <div className="py-10 text-center text-xs text-muted-foreground">
-                  Belum ada opsi untuk produk ini.
+                <div className="rounded-2xl border border-dashed p-6 text-center text-xs text-muted-foreground space-y-2">
+                  <p className="font-semibold text-foreground">Produk ini belum punya struktur paket.</p>
+                  <p>Mulai dari tambah grup opsi, misalnya: Potongan Ayam, Pilihan Sambal, atau Tambahan.</p>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Preview Struktur Paket</p>
+                    <div className="rounded-2xl border bg-muted/20 p-3 space-y-2">
+                      {getProductGroups(optionProduct.id).map(group => (
+                        <div key={`summary-${group.id}`} className="rounded-xl bg-background border px-3 py-2">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-sm font-semibold">{group.name}</p>
+                              <Badge variant="outline" className="text-[10px]">
+                                {group.required ? 'Wajib' : 'Opsional'}
+                              </Badge>
+                            </div>
+                            <span className="text-[11px] text-muted-foreground">
+                              pilih {group.minSelect}-{group.maxSelect}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {getGroupOptions(group.id).map(option => (
+                              <Badge
+                                key={`summary-option-${option.id}`}
+                                variant="secondary"
+                                className={cn(
+                                  'text-[10px]',
+                                  option.isDefault === 1 && 'bg-primary/10 text-primary'
+                                )}
+                              >
+                                {option.name}
+                                {option.isDefault === 1 ? ' • default' : ''}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-3">
                   {getProductGroups(optionProduct.id).map(group => (
-                    <div key={group.id} className="border rounded-lg p-3 space-y-3">
+                    <div key={group.id} className="border rounded-2xl p-4 space-y-3 bg-background">
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <p className="text-sm font-bold">{group.name}</p>
@@ -801,7 +913,7 @@ export default function Produk() {
                         {getGroupOptions(group.id).map(option => {
                           const recipes = getOptionRecipes(option.id);
                           return (
-                            <div key={option.id} className="rounded-lg bg-muted/40 p-2.5 space-y-2">
+                            <div key={option.id} className="rounded-xl bg-muted/40 p-3 space-y-2">
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0">
                                   <div className="flex items-center gap-1.5">
@@ -811,9 +923,12 @@ export default function Produk() {
                                   <p className="text-[11px] text-muted-foreground">
                                     +Rp {(option.priceDelta || 0).toLocaleString('id-ID')} · HPP +Rp {(option.hppDelta || 0).toLocaleString('id-ID')}
                                   </p>
+                                  <p className="text-[11px] text-muted-foreground mt-1">
+                                    {getOptionRecipeSummary(option.id)}
+                                  </p>
                                 </div>
                                 <div className="flex gap-1">
-                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openRecipeDialog(option)}>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7" title="Atur pengurangan stok opsi" onClick={() => openRecipeDialog(option)}>
                                     <LinkIcon className="w-3.5 h-3.5" />
                                   </Button>
                                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openOptionEdit(option)}>
@@ -840,10 +955,11 @@ export default function Produk() {
 
                       <Button variant="outline" size="sm" className="w-full h-9 text-xs gap-1.5" onClick={() => openOptionAdd(group)}>
                         <Plus className="w-3.5 h-3.5" />
-                        Tambah Opsi
+                        Tambah Opsi ke Grup Ini
                       </Button>
                     </div>
                   ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -855,7 +971,7 @@ export default function Produk() {
       <Dialog open={optionGroupDialog} onOpenChange={setOptionGroupDialog}>
         <DialogContent className="max-w-[95vw] rounded-xl">
           <DialogHeader>
-            <DialogTitle>{editingGroup ? 'Edit Grup Opsi' : 'Tambah Grup Opsi'}</DialogTitle>
+            <DialogTitle>{editingGroup ? 'Edit Grup Paket' : 'Tambah Grup Paket'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-2">
             <div className="space-y-1.5">
@@ -864,7 +980,7 @@ export default function Produk() {
             </div>
             <button type="button" onClick={() => setGroupRequired(v => !v)} className={cn('w-full p-3 rounded-lg border text-left text-sm', groupRequired ? 'border-primary bg-primary/5' : 'border-border bg-muted/30')}>
               <span className="font-semibold">{groupRequired ? 'Wajib dipilih' : 'Opsional'}</span>
-              <span className="block text-xs text-muted-foreground mt-0.5">Atur apakah kasir harus memilih opsi dari grup ini.</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">Atur apakah kasir harus memilih isi paket dari grup ini.</span>
             </button>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -887,7 +1003,7 @@ export default function Produk() {
       <Dialog open={optionDialog} onOpenChange={setOptionDialog}>
         <DialogContent className="max-w-[95vw] rounded-xl">
           <DialogHeader>
-            <DialogTitle>{editingOption ? 'Edit Opsi' : 'Tambah Opsi'}</DialogTitle>
+            <DialogTitle>{editingOption ? 'Edit Isi Paket' : 'Tambah Isi Paket'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-2">
             <div className="space-y-1.5">
@@ -906,7 +1022,7 @@ export default function Produk() {
             </div>
             <button type="button" onClick={() => setOptionDefault(v => !v)} className={cn('w-full p-3 rounded-lg border text-left text-sm', optionDefault ? 'border-primary bg-primary/5' : 'border-border bg-muted/30')}>
               <span className="font-semibold">Jadikan default</span>
-              <span className="block text-xs text-muted-foreground mt-0.5">Opsi ini otomatis terpilih saat kasir membuka produk.</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">Opsi ini otomatis terpilih saat kasir membuka paket.</span>
             </button>
             <Button className="w-full h-11" onClick={saveOption} disabled={!optionName.trim()}>
               Simpan Opsi
@@ -919,13 +1035,16 @@ export default function Produk() {
       <Dialog open={recipeDialog} onOpenChange={setRecipeDialog}>
         <DialogContent className="max-w-[95vw] rounded-xl">
           <DialogHeader>
-            <DialogTitle>Resep Opsi</DialogTitle>
+            <DialogTitle>Link Stok untuk Opsi</DialogTitle>
           </DialogHeader>
           {recipeOption && (
             <div className="space-y-4 mt-2">
               <div className="p-3 bg-muted/40 rounded-lg">
                 <p className="text-xs text-muted-foreground">Opsi</p>
                 <p className="text-sm font-semibold">{recipeOption.name}</p>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Tambahkan bahan gudang yang harus berkurang saat opsi ini dipilih kasir.
+                </p>
               </div>
               <div className="grid grid-cols-[1fr_90px] gap-2">
                 <Select value={recipeWarehouseItemId} onValueChange={setRecipeWarehouseItemId}>

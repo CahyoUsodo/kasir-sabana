@@ -6,7 +6,7 @@ import { Download, Share2, Printer, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { db, type Transaction, type StoreSettings, type TransactionItemRecord } from '@/lib/db';
+import { db, getConfiguredProductReceiptDetails, type Transaction, type StoreSettings, type TransactionItemRecord } from '@/lib/db';
 import { cn } from '@/lib/utils';
 
 interface ReceiptProps {
@@ -130,8 +130,29 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
   const [generating, setGenerating] = useState(false);
   const [queueNumber, setQueueNumber] = useState<number | null>(null);
   const [previewType, setPreviewType] = useState<'customer' | 'kitchen'>('customer');
+  const [resolvedItemDetails, setResolvedItemDetails] = useState<Record<string, string[]>>({});
 
   const printableItems = items.filter(item => item.productId >= 0);
+  const printableItemsKey = JSON.stringify(
+    printableItems.map(item => ({
+      id: item.id,
+      transactionId: item.transactionId,
+      productId: item.productId,
+      stockKey: item.stockKey,
+      productName: item.productName,
+      productBaseName: item.productBaseName,
+      selectedOptionIds: item.selectedOptions?.map(option => option.optionId) ?? [],
+      receiptDetails: item.receiptDetails ?? [],
+    }))
+  );
+  const getItemKey = (item: TransactionItemRecord, index: number) =>
+    String(item.id ?? `${item.transactionId}-${item.stockKey ?? `${item.productId}-${index}`}`);
+  const getItemDetails = (item: TransactionItemRecord, index: number) =>
+    resolvedItemDetails[getItemKey(item, index)] ?? item.receiptDetails ?? [];
+  const getDisplayName = (item: TransactionItemRecord, index: number) =>
+    getItemDetails(item, index).length > 0 && item.productBaseName
+      ? item.productBaseName
+      : item.productName;
 
   useEffect(() => {
     const fetchQueueNumber = async () => {
@@ -174,6 +195,41 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
 
     fetchQueueNumber();
   }, [transaction.id, transaction.date]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const resolveItemDetails = async () => {
+      const entries = await Promise.all(printableItems.map(async (item, index) => {
+        const key = getItemKey(item, index);
+        if (item.receiptDetails && item.receiptDetails.length > 0) {
+          return [key, item.receiptDetails] as const;
+        }
+
+        const selectedOptionIds = item.selectedOptions?.map(option => option.optionId) ?? [];
+        if (selectedOptionIds.length === 0) {
+          return [key, []] as const;
+        }
+
+        const details = await getConfiguredProductReceiptDetails(item.productId, selectedOptionIds);
+        return [key, details] as const;
+      }));
+
+      if (!cancelled) {
+        setResolvedItemDetails(Object.fromEntries(entries));
+      }
+    };
+
+    if (open) {
+      void resolveItemDetails();
+    } else {
+      setResolvedItemDetails({});
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, printableItemsKey]);
 
   const captureReceipt = async (): Promise<HTMLCanvasElement | null> => {
     if (!receiptRef.current) return null;
@@ -329,7 +385,9 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
         lines.push('--------------------------------\n');
                for (let i = 0; i < printableItems.length; i++) {
           const item = printableItems[i];
-          lines.push(`${item.productName}\n`);
+          const detailLines = getItemDetails(item, i);
+          lines.push(`${getDisplayName(item, i)}\n`);
+          detailLines.forEach(detail => lines.push(`  - ${detail}\n`));
           if (item.notes) lines.push(`  ${item.notes}\n`);
           
           const qtyPrice = `  ${item.quantity} x Rp ${item.price.toLocaleString('id-ID')}`;
@@ -395,9 +453,10 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
  
         for (let i = 0; i < printableItems.length; i++) {
           const item = printableItems[i];
+          const detailLines = getItemDetails(item, i);
           const qtyStr = `[${item.quantity}x]`.padEnd(6, ' ');
           const maxNameWidth = 32 - qtyStr.length;
-          const nameLines = wrapText(item.productName, maxNameWidth);
+          const nameLines = wrapText(getDisplayName(item, i), maxNameWidth);
           
           lines.push('\x1B\x45\x01'); // Bold on
           if (nameLines.length > 0) {
@@ -408,6 +467,14 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
             }
           }
           lines.push('\x1B\x45\x00'); // Bold off
+          if (detailLines.length > 0) {
+            const padding = ' '.repeat(qtyStr.length);
+            detailLines.forEach(detail => {
+              wrapText(`- ${detail}`, maxNameWidth).forEach(detailLine => {
+                lines.push(`${padding}${detailLine}\n`);
+              });
+            });
+          }
           if (item.notes) {
             wrapText(`* Catatan: ${item.notes}`, 30).forEach(noteLine => {
               lines.push(`  ${noteLine}\n`);
@@ -564,7 +631,14 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
               {/* Items */}
               {printableItems.map((item, i) => (
                 <div key={i} className="mb-3">
-                  <p className="text-[11px] font-medium">{item.productName}</p>
+                  <p className="text-[11px] font-medium">{getDisplayName(item, i)}</p>
+                  {getItemDetails(item, i).length > 0 && (
+                    <div className="mt-0.5 space-y-0.5">
+                      {getItemDetails(item, i).map(detail => (
+                        <p key={`${detail}-${i}`} className="text-[9px] text-gray-600">- {detail}</p>
+                      ))}
+                    </div>
+                  )}
                   {item.notes && <p className="text-[9px] text-gray-500 italic">  {item.notes}</p>}
                   <div className="flex justify-between text-[10px]">
                     <span>{item.quantity} x {rp(item.price)}</span>
@@ -681,7 +755,16 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
                         {item.quantity}x
                       </span>
                       <div className="flex-1">
-                        <p className="font-bold leading-tight">{item.productName}</p>
+                        <p className="font-bold leading-tight">{getDisplayName(item, i)}</p>
+                        {getItemDetails(item, i).length > 0 && (
+                          <div className="mt-1 space-y-0.5">
+                            {getItemDetails(item, i).map(detail => (
+                              <p key={`${detail}-kitchen-${i}`} className="text-[10px] text-gray-700">
+                                - {detail}
+                              </p>
+                            ))}
+                          </div>
+                        )}
                         {item.notes && (
                           <p className="text-[10px] text-gray-700 font-medium italic mt-0.5">
                             * Catatan: {item.notes}
