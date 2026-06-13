@@ -179,6 +179,61 @@ export default function Laporan() {
 
   const rp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
 
+  const getStockCategory = (name: string) => {
+    const normalized = name.toLowerCase();
+
+    if (
+      normalized.includes('plastik') ||
+      normalized.includes('box') ||
+      normalized.includes('kemasan')
+    ) return 'Kemasan';
+
+    if (
+      normalized.includes('saus') ||
+      normalized.includes('sambal') ||
+      normalized.includes('mentai') ||
+      normalized.includes('blackpepper') ||
+      normalized.includes('buldak')
+    ) return 'Saus & Bumbu';
+
+    if (
+      normalized.includes('fruit tea') ||
+      normalized.includes('teh') ||
+      normalized.includes('kopi') ||
+      normalized.includes('americano') ||
+      normalized.includes('cold brew') ||
+      normalized.includes('cokelat') ||
+      normalized.includes('thai tea')
+    ) return 'Minuman';
+
+    if (
+      normalized.includes('nasi') ||
+      normalized.includes('beras') ||
+      normalized.includes('kentang')
+    ) return 'Karbohidrat';
+
+    if (
+      normalized.includes('dada') ||
+      normalized.includes('paha') ||
+      normalized.includes('sayap') ||
+      normalized.includes('ayam') ||
+      normalized.includes('daging chicken strip') ||
+      normalized.includes('chicken strip') ||
+      normalized.includes('chicken roll') ||
+      normalized.includes('kulit')
+    ) return 'Ayam & Protein';
+
+    if (
+      normalized.includes('bakso') ||
+      normalized.includes('burger') ||
+      normalized.includes('bun')
+    ) return 'Pelengkap';
+
+    return 'Lain-lain';
+  };
+
+  const stockCategoryOrder = ['Ayam & Protein', 'Karbohidrat', 'Saus & Bumbu', 'Kemasan', 'Minuman', 'Pelengkap', 'Lain-lain'];
+
   const isDateInSelectedPeriod = (dateStr?: string) => {
     if (!dateStr) return false;
 
@@ -249,13 +304,24 @@ export default function Laporan() {
       return {
         id: item.id!,
         name: item.name,
+        category: getStockCategory(item.name),
         unit: item.unit,
         awal,
         terpakai,
         sisa
       };
+    }).sort((a, b) => {
+      const categoryDiff = stockCategoryOrder.indexOf(a.category) - stockCategoryOrder.indexOf(b.category);
+      if (categoryDiff !== 0) return categoryDiff;
+      return a.name.localeCompare(b.name, 'id');
     });
   })();
+
+  const groupedStockReport = stockReport.reduce<Record<string, typeof stockReport>>((groups, item) => {
+    if (!groups[item.category]) groups[item.category] = [];
+    groups[item.category].push(item);
+    return groups;
+  }, {});
 
   // === Export to Excel ===
   const exportToExcel = async () => {
@@ -865,16 +931,35 @@ export default function Laporan() {
     });
     wsStok.autoFilter = 'A1:F1';
 
-    stockReport.forEach((item, i) => {
-      const row = wsStok.addRow({
-        no: i + 1,
-        name: item.name,
-        unit: item.unit,
-        awal: item.awal,
-        terpakai: item.terpakai,
-        sisa: item.sisa
+    let stockRowNumber = 1;
+    stockCategoryOrder.filter(category => groupedStockReport[category]?.length).forEach(category => {
+      const categoryRow = wsStok.addRow({
+        no: '',
+        name: category,
+        unit: '',
+        awal: '',
+        terpakai: '',
+        sisa: ''
       });
-      row.eachCell(cell => { cell.border = cellBorder; });
+      wsStok.mergeCells(`B${categoryRow.number}:F${categoryRow.number}`);
+      categoryRow.getCell('B').font = { bold: true, color: { argb: 'FFB42829' } };
+      categoryRow.getCell('B').fill = dateHeaderFill;
+      categoryRow.getCell('B').alignment = { horizontal: 'left', vertical: 'middle' };
+      categoryRow.eachCell(cell => {
+        cell.border = cellBorder;
+      });
+
+      groupedStockReport[category].forEach(item => {
+        const row = wsStok.addRow({
+          no: stockRowNumber++,
+          name: item.name,
+          unit: item.unit,
+          awal: item.awal,
+          terpakai: item.terpakai,
+          sisa: item.sisa
+        });
+        row.eachCell(cell => { cell.border = cellBorder; });
+      });
     });
 
     // ============================================
@@ -1104,26 +1189,33 @@ export default function Laporan() {
             <p className="text-xs text-muted-foreground py-4 text-center">Belum ada data stok</p>
           ) : (
             <div className="space-y-4">
-              {stockReport.map((item) => (
-                <div key={item.id} className="border-b last:border-0 pb-3 last:pb-0">
-                  <div className="flex justify-between items-center mb-1.5">
-                    <span className="text-sm font-semibold text-foreground">{item.name}</span>
-                    <span className="text-xs text-muted-foreground font-medium bg-secondary/30 px-2.5 py-0.5 rounded-full">{item.unit}</span>
+              {stockCategoryOrder.filter(category => groupedStockReport[category]?.length).map(category => (
+                <div key={category} className="space-y-3">
+                  <div className="px-3 py-2 rounded-lg border bg-muted/20">
+                    <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{category}</p>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                    <div className="bg-muted/40 p-2 rounded">
-                      <p className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider mb-0.5">Stok Awal</p>
-                      <p className="font-bold text-foreground text-sm">{item.awal}</p>
+                  {groupedStockReport[category].map((item) => (
+                    <div key={item.id} className="border-b last:border-0 pb-3 last:pb-0">
+                      <div className="flex justify-between items-center mb-1.5">
+                        <span className="text-sm font-semibold text-foreground">{item.name}</span>
+                        <span className="text-xs text-muted-foreground font-medium bg-secondary/30 px-2.5 py-0.5 rounded-full">{item.unit}</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                        <div className="bg-muted/40 p-2 rounded">
+                          <p className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider mb-0.5">Stok Awal</p>
+                          <p className="font-bold text-foreground text-sm">{item.awal}</p>
+                        </div>
+                        <div className="bg-primary/10 p-2 rounded">
+                          <p className="text-[9px] text-primary uppercase font-bold tracking-wider mb-0.5">Terpakai</p>
+                          <p className="font-bold text-primary text-sm">{item.terpakai}</p>
+                        </div>
+                        <div className="bg-success/15 p-2 rounded">
+                          <p className="text-[9px] text-success uppercase font-bold tracking-wider mb-0.5">Sisa Stok</p>
+                          <p className="font-bold text-success text-sm">{item.sisa}</p>
+                        </div>
+                      </div>
                     </div>
-                    <div className="bg-primary/10 p-2 rounded">
-                      <p className="text-[9px] text-primary uppercase font-bold tracking-wider mb-0.5">Terpakai</p>
-                      <p className="font-bold text-primary text-sm">{item.terpakai}</p>
-                    </div>
-                    <div className="bg-success/15 p-2 rounded">
-                      <p className="text-[9px] text-success uppercase font-bold tracking-wider mb-0.5">Sisa Stok</p>
-                      <p className="font-bold text-success text-sm">{item.sisa}</p>
-                    </div>
-                  </div>
+                  ))}
                 </div>
               ))}
             </div>
