@@ -92,6 +92,8 @@ export default function Produk() {
 
   const getCategoryName = (catId: number) => categories?.find(c => c.id === catId)?.name ?? '-';
   const getCategoryColor = (catId: number) => categories?.find(c => c.id === catId)?.color ?? '#999';
+  const normalizeText = (value?: string) =>
+    (value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
   const getProductGroups = (productId?: number) => (productOptionGroups ?? [])
     .filter(group => group.productId === productId && group.isDeleted === 0)
@@ -142,12 +144,45 @@ export default function Produk() {
     return minStock === Infinity ? 0 : minStock;
   };
 
+  const getAdminCategoryRank = (product: Product) => {
+    const categoryName = normalizeText(getCategoryName(product.categoryId));
+    const name = normalizeText(product.name);
+
+    if (categoryName.includes('makanan')) {
+      if (name.includes('ayam reguler') || name.includes('ayam regular')) return 0;
+      if (name.includes('paket') || name.includes('rice bowl') || name.includes('ayam sambal')) return 1;
+      return 2;
+    }
+    if (categoryName.includes('add on')) return 3;
+    if (categoryName.includes('minuman')) return 4;
+    if (categoryName.includes('kemasan')) return 5;
+    return 6;
+  };
+
+  const compareAdminProducts = (a: Product, b: Product) => {
+    const aHasOptions = (productOptionGroups ?? []).some(group => group.productId === a.id && group.isDeleted === 0);
+    const bHasOptions = (productOptionGroups ?? []).some(group => group.productId === b.id && group.isDeleted === 0);
+    if (aHasOptions !== bHasOptions) return aHasOptions ? -1 : 1;
+
+    const aHasRecipe = getProductRecipeCount(a.id) > 0;
+    const bHasRecipe = getProductRecipeCount(b.id) > 0;
+    if (aHasRecipe !== bHasRecipe) return aHasRecipe ? -1 : 1;
+
+    const categoryDiff = getAdminCategoryRank(a) - getAdminCategoryRank(b);
+    if (categoryDiff !== 0) return categoryDiff;
+
+    const stockDiff = a.stock - b.stock;
+    if (stockDiff !== 0 && (aHasRecipe || bHasRecipe)) return stockDiff;
+
+    return normalizeText(a.name).localeCompare(normalizeText(b.name), 'id');
+  };
+
   const filtered = rawFiltered.map(p => {
     return {
       ...p,
       stock: getDisplayStockForProduct(p),
     };
-  });
+  }).sort(compareAdminProducts);
 
   const hasProductOptions = (productId?: number) => getProductGroups(productId).length > 0;
   const getProductOptionCount = (productId?: number) =>

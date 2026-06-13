@@ -96,6 +96,113 @@ export default function Kasir() {
     .filter(option => option.groupId === groupId && option.isDeleted === 0)
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
+  const normalizeText = (value?: string) =>
+    (value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+  const getCategoryName = (categoryId: number) =>
+    categories?.find(category => category.id === categoryId)?.name || '';
+
+  const getCashierProductFamilyRank = (product: Product) => {
+    const name = normalizeText(product.name);
+    const categoryName = normalizeText(getCategoryName(product.categoryId));
+
+    if (product.categoryId === -99 || name.includes('plastik') || name.includes('box') || name.includes('kemasan')) {
+      return 5;
+    }
+
+    if (
+      categoryName.includes('minuman') ||
+      name.includes('fruit tea') ||
+      name.includes('teh') ||
+      name.includes('kopi') ||
+      name.includes('americano') ||
+      name.includes('matcha') ||
+      name.includes('thai tea') ||
+      name.includes('cold brew') ||
+      name.includes('cokelat') ||
+      name.includes('butterscotch')
+    ) {
+      return 4;
+    }
+
+    if (
+      categoryName.includes('add on') ||
+      name.includes('saus') ||
+      name.includes('sambal') ||
+      name.includes('mentai') ||
+      name.includes('blackpepper') ||
+      name.includes('buldak') ||
+      name.includes('geprek')
+    ) {
+      return 3;
+    }
+
+    if (
+      name.includes('bakso') ||
+      name.includes('chicken roll') ||
+      name.includes('chicken strip') ||
+      name.includes('kulit') ||
+      name.includes('kentang') ||
+      name.includes('chicken bun') ||
+      name.includes('burger') ||
+      name.includes('katsu')
+    ) {
+      return 2;
+    }
+
+    if (
+      categoryName.includes('paket') ||
+      name.includes('paket') ||
+      name.includes('rice bowl') ||
+      name.includes('ayam sambal')
+    ) {
+      return 1;
+    }
+
+    if (
+      name.includes('ayam reguler') ||
+      name.includes('ayam regular') ||
+      name.includes('sayap') ||
+      name.includes('paha bawah') ||
+      name.includes('dada') ||
+      name.includes('paha atas')
+    ) {
+      return 0;
+    }
+
+    return 2;
+  };
+
+  const getCashierProductSpecificRank = (product: Product) => {
+    const name = normalizeText(product.name);
+    if (name.includes('ayam reguler') || name.includes('ayam regular')) return 0;
+    if (name.includes('sayap')) return 1;
+    if (name.includes('paha bawah')) return 2;
+    if (name.includes('dada')) return 3;
+    if (name.includes('paha atas')) return 4;
+    if (name.includes('paket bundling')) return 5;
+    if (name.includes('rice bowl geprek')) return 6;
+    if (name.includes('rice bowl bbq')) return 7;
+    if (name.includes('rice bowl chicken katsu')) return 8;
+    if (name.includes('ayam sambal geprek')) return 9;
+    if (name.includes('ayam sambal ijo')) return 10;
+    if (name.includes('ayam sambal hitam')) return 11;
+    return 99;
+  };
+
+  const compareCashierProducts = (a: Product, b: Product) => {
+    const familyDiff = getCashierProductFamilyRank(a) - getCashierProductFamilyRank(b);
+    if (familyDiff !== 0) return familyDiff;
+
+    const specificDiff = getCashierProductSpecificRank(a) - getCashierProductSpecificRank(b);
+    if (specificDiff !== 0) return specificDiff;
+
+    const categoryDiff = normalizeText(getCategoryName(a.categoryId)).localeCompare(normalizeText(getCategoryName(b.categoryId)));
+    if (categoryDiff !== 0) return categoryDiff;
+
+    return normalizeText(a.name).localeCompare(normalizeText(b.name), 'id');
+  };
+
   const getDefaultSelectionForProduct = (product: Product) =>
     getDefaultOptionSelection(product.id, productOptionGroups ?? [], productOptions ?? []);
 
@@ -449,7 +556,7 @@ export default function Kasir() {
     const allowedStock = p.stock + origQty;
     const hasConfigOptions = getProductGroups(p.id).length > 0;
     return matchSearch && matchCategory && (hasConfigOptions || allowedStock > 0 || cartProductIds.has(baseStockKey));
-  });
+  }).sort(compareCashierProducts);
 
   const doFullReset = () => {
     setCart([]);
