@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { db, duplicateProduct } from "@/lib/db";
+import { db, deleteDailyExpenseEntry, duplicateProduct, recordDailyExpense, recordWarehouseUsage, revertWarehouseUsageLog } from "@/lib/db";
 
 describe("duplicateProduct", () => {
   beforeEach(async () => {
@@ -193,5 +193,62 @@ describe("duplicateProduct", () => {
     const dupId3 = await duplicateProduct(product1Id);
     const prod3 = await db.products.get(dupId3);
     expect(prod3?.sku).toBe("PROD-001-copy3");
+  });
+});
+
+describe("daily operational records", () => {
+  beforeEach(async () => {
+    await db.dailyExpenses.clear();
+    await db.warehouseUsageLogs.clear();
+    await db.warehouseItems.clear();
+  });
+
+  it("records daily expense entries", async () => {
+    await recordDailyExpense({
+      amount: 25000,
+      purpose: "Beli es batu",
+    });
+
+    const expenses = await db.dailyExpenses.toArray();
+    expect(expenses).toHaveLength(1);
+    expect(expenses[0]).toMatchObject({
+      amount: 25000,
+      purpose: "Beli es batu",
+    });
+
+    await deleteDailyExpenseEntry(expenses[0].id!);
+    await expect(db.dailyExpenses.toArray()).resolves.toHaveLength(0);
+  });
+
+  it("deducts stock when recording manual warehouse usage and restores it when reverted", async () => {
+    const now = new Date();
+    const itemId = await db.warehouseItems.add({
+      name: "Beras 10 Liter",
+      stock: 5,
+      unit: "pcs",
+      isCashierVisible: 0,
+      isDailyReset: 0,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const logId = await recordWarehouseUsage({
+      warehouseItemId: itemId,
+      quantity: 2,
+      purpose: "Masak nasi siang",
+    });
+
+    await expect(db.warehouseItems.get(itemId)).resolves.toMatchObject({ stock: 3 });
+    await expect(db.warehouseUsageLogs.get(logId)).resolves.toMatchObject({
+      warehouseItemName: "Beras 10 Liter",
+      quantity: 2,
+      purpose: "Masak nasi siang",
+    });
+
+    await revertWarehouseUsageLog(logId);
+
+    await expect(db.warehouseItems.get(itemId)).resolves.toMatchObject({ stock: 5 });
+    await expect(db.warehouseUsageLogs.get(logId)).resolves.toBeUndefined();
   });
 });

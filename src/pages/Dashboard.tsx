@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type TransactionItemRecord } from '@/lib/db';
 import { useState } from 'react';
-import { ShoppingCart, Package, BarChart3, TrendingUp, AlertTriangle, Receipt, ChevronRight, ClipboardList, Warehouse } from 'lucide-react';
+import { ShoppingCart, Package, BarChart3, TrendingUp, AlertTriangle, Receipt, ChevronRight, ClipboardList, Warehouse, DollarSign } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -146,6 +146,7 @@ export default function Dashboard() {
     { to: '/cashier', icon: ShoppingCart, label: 'Kasir', color: 'bg-primary/10 text-primary', perm: 'create_transaction' },
     { to: '/products', icon: Package, label: 'Produk', color: 'bg-accent/10 text-accent' },
     { to: '/warehouse', icon: Warehouse, label: 'Gudang & Resep', color: 'bg-amber-100 text-amber-700' },
+    { to: '/daily-expenses', icon: DollarSign, label: 'Pengeluaran', color: 'bg-rose-100 text-rose-700', perm: 'manage_stock_inout' },
     { to: '/reports', icon: BarChart3, label: 'Laporan', color: 'bg-success/10 text-success', perm: 'view_reports' },
   ];
   const visibleActions = quickActions.filter((a) => !a.perm || can(a.perm));

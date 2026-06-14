@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type PaymentMethod, type Category, type Unit } from '@/lib/db';
 import { useState, useEffect, useRef } from 'react';
-import { Settings, Store, CreditCard, Tag, Download, Upload, Plus, Trash2, Edit2, Info, Truck, ChevronRight, Receipt, Palette, HardDrive, Camera, X, Ruler, Users as UsersIcon, ShieldCheck, LogOut, Smartphone, CheckCircle2, Globe, Share2, CloudUpload, CloudDownload, KeyRound, Warehouse } from 'lucide-react';
+import { Settings, Store, CreditCard, Tag, Download, Upload, Plus, Trash2, Edit2, Info, Truck, ChevronRight, Receipt, Palette, HardDrive, Camera, X, Ruler, Users as UsersIcon, ShieldCheck, LogOut, Smartphone, CheckCircle2, Globe, Share2, CloudUpload, CloudDownload, KeyRound, Warehouse, DollarSign } from 'lucide-react';
 import ThemeColorPicker from '@/components/ThemeColorPicker';
 import { setThemeColor } from '@/hooks/use-theme-color';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -166,6 +166,8 @@ export default function Pengaturan() {
       db.productOptions,
       db.productOptionRecipes,
       db.dailyPrepFormulas,
+      db.dailyExpenses,
+      db.warehouseUsageLogs,
     ], async () => {
       await db.categories.clear();
       await db.products.clear();
@@ -185,6 +187,8 @@ export default function Pengaturan() {
       await db.productOptions.clear();
       await db.productOptionRecipes.clear();
       await db.dailyPrepFormulas.clear();
+      await db.dailyExpenses.clear();
+      await db.warehouseUsageLogs.clear();
 
       if (data.categories?.length) await db.categories.bulkAdd(data.categories);
       if (data.products?.length) await db.products.bulkAdd(data.products);
@@ -202,6 +206,8 @@ export default function Pengaturan() {
       if (data.productOptions?.length) await db.productOptions.bulkAdd(data.productOptions);
       if (data.productOptionRecipes?.length) await db.productOptionRecipes.bulkAdd(data.productOptionRecipes);
       if (data.dailyPrepFormulas?.length) await db.dailyPrepFormulas.bulkAdd(data.dailyPrepFormulas);
+      if (data.dailyExpenses?.length) await db.dailyExpenses.bulkAdd(data.dailyExpenses);
+      if (data.warehouseUsageLogs?.length) await db.warehouseUsageLogs.bulkAdd(data.warehouseUsageLogs);
 
       if (Array.isArray(data.units) && data.units.length > 0) {
         await db.units.bulkAdd(data.units);
@@ -786,6 +792,15 @@ export default function Pengaturan() {
             <CardContent className="p-3 flex items-center gap-3">
               <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><Warehouse className="w-4 h-4" /></div>
               <div className="flex-1"><p className="text-sm font-semibold">Stok Gudang & Resep</p><p className="text-[10px] text-muted-foreground">Persiapan harian ayam & resep bahan baku</p></div>
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            </CardContent>
+          </Card>
+        </Link>
+        <Link to="/daily-expenses">
+          <Card className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
+            <CardContent className="p-3 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><DollarSign className="w-4 h-4" /></div>
+              <div className="flex-1"><p className="text-sm font-semibold">Pengeluaran Harian</p><p className="text-[10px] text-muted-foreground">Catat pengeluaran cabang & pemakaian stok manual</p></div>
               <ChevronRight className="w-4 h-4 text-muted-foreground" />
             </CardContent>
           </Card>

@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type TransactionItemRecord } from '@/lib/db';
 import { useState } from 'react';
-import { BarChart3, TrendingUp, ShoppingCart, Package, DollarSign, ArrowDown, ArrowUp, Minus, Download } from 'lucide-react';
+import { BarChart3, TrendingUp, ShoppingCart, Package, DollarSign, ArrowDown, ArrowUp, Minus, Download, PackageMinus } from 'lucide-react';
 import type { Border, Borders, Fill, Style } from 'exceljs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -50,6 +50,36 @@ export default function Laporan() {
   const productRecipes = useLiveQuery(() => db.productRecipes.toArray());
   const productOptionRecipes = useLiveQuery(() => db.productOptionRecipes.toArray());
   const dailyPrepFormulas = useLiveQuery(() => db.dailyPrepFormulas.toArray());
+  const dailyExpenses = useLiveQuery(async () => {
+    if (period === 'custom') {
+      if (dateFrom && dateTo) {
+        return db.dailyExpenses.where('date').between(startOfDay(dateFrom), endOfDay(dateTo), true, true).toArray();
+      } else if (dateFrom) {
+        return db.dailyExpenses.where('date').aboveOrEqual(startOfDay(dateFrom)).toArray();
+      } else if (dateTo) {
+        return db.dailyExpenses.where('date').belowOrEqual(endOfDay(dateTo)).toArray();
+      }
+      return [];
+    }
+
+    const since = startOfDay(subDays(new Date(), days));
+    return db.dailyExpenses.where('date').aboveOrEqual(since).toArray();
+  }, [days, period, dateFrom, dateTo]);
+  const warehouseUsageLogs = useLiveQuery(async () => {
+    if (period === 'custom') {
+      if (dateFrom && dateTo) {
+        return db.warehouseUsageLogs.where('date').between(startOfDay(dateFrom), endOfDay(dateTo), true, true).toArray();
+      } else if (dateFrom) {
+        return db.warehouseUsageLogs.where('date').aboveOrEqual(startOfDay(dateFrom)).toArray();
+      } else if (dateTo) {
+        return db.warehouseUsageLogs.where('date').belowOrEqual(endOfDay(dateTo)).toArray();
+      }
+      return [];
+    }
+
+    const since = startOfDay(subDays(new Date(), days));
+    return db.warehouseUsageLogs.where('date').aboveOrEqual(since).toArray();
+  }, [days, period, dateFrom, dateTo]);
 
   // Permission gate after all hooks have been called.
   if (!can('view_reports')) {
@@ -69,6 +99,8 @@ export default function Laporan() {
   const netSales = totalRevenue - totalDiscount; // same as totalSales
   const grossProfit = netSales - totalHpp;
   const marginPercent = netSales > 0 ? (grossProfit / netSales * 100) : 0;
+  const totalOperationalExpenses = (dailyExpenses ?? []).reduce((sum, item) => sum + item.amount, 0);
+  const netProfitAfterExpenses = grossProfit - totalOperationalExpenses;
 
   const txDiscountInfo: Record<number, { extraDiscount: number; itemSubtotalSum: number }> = {};
   transactions?.forEach(t => {
@@ -307,6 +339,12 @@ export default function Laporan() {
       usedMap[item.id!] += item.dailyPrepQty || 0;
     });
 
+    (warehouseUsageLogs ?? []).forEach(log => {
+      if (usedMap[log.warehouseItemId] !== undefined) {
+        usedMap[log.warehouseItemId] += log.quantity;
+      }
+    });
+
     return warehouseItems.map(item => {
       const terpakai = usedMap[item.id!] || 0;
       const sisa = item.stock;
@@ -332,6 +370,14 @@ export default function Laporan() {
     groups[item.category].push(item);
     return groups;
   }, {});
+
+  const recentExpenses = [...(dailyExpenses ?? [])]
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, 6);
+
+  const recentUsageLogs = [...(warehouseUsageLogs ?? [])]
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, 6);
 
   // === Export to Excel ===
   const exportToExcel = async () => {
@@ -484,6 +530,18 @@ export default function Laporan() {
       { label: 'Margin', val: marginPercent / 100, fmt: percentFormat }
     ];
 
+    const financialSummaryRows = [
+      { label: 'Transaksi', val: txCount, fmt: null },
+      { label: 'Pendapatan Kotor', val: totalRevenue, fmt: currencyFormat },
+      { label: 'Diskon', val: totalDiscount, fmt: currencyFormat },
+      { label: 'Penjualan Bersih', val: netSales, fmt: currencyFormat },
+      { label: 'HPP (Modal)', val: totalHpp, fmt: currencyFormat },
+      { label: 'Profit (Laba Kotor)', val: grossProfit, fmt: currencyFormat },
+      { label: 'Pengeluaran Operasional', val: totalOperationalExpenses, fmt: currencyFormat },
+      { label: 'Laba Bersih', val: netProfitAfterExpenses, fmt: currencyFormat },
+      { label: 'Margin', val: marginPercent / 100, fmt: percentFormat }
+    ];
+
     cardData.forEach((c, idx) => {
       const startLetter = String.fromCharCode(65 + (idx * 2)); // A, C, E, G, I, K, M
       const endLetter = String.fromCharCode(65 + (idx * 2) + 1); // B, D, F, H, J, L, N
@@ -523,7 +581,7 @@ export default function Laporan() {
     ['A14','D14'].forEach(c => { wsRingkasan.getCell(c).font = { bold: true }; wsRingkasan.getCell(c).alignment = { horizontal: 'center' }; });
 
     let rRow = 15;
-    cardData.forEach(c => {
+    financialSummaryRows.forEach(c => {
       wsRingkasan.mergeCells(`A${rRow}:C${rRow}`);
       wsRingkasan.mergeCells(`D${rRow}:F${rRow}`);
       
@@ -537,7 +595,7 @@ export default function Laporan() {
           wsRingkasan.getCell(`${col}${rRow}`).fill = subtotalFill;
         });
       }
-      if (c.label === 'Penjualan Bersih') {
+      if (c.label === 'Penjualan Bersih' || c.label === 'Laba Bersih') {
         ['A','D'].forEach(col => {
           wsRingkasan.getCell(`${col}${rRow}`).font = { bold: true, color: { argb: 'FFB42829' } };
           wsRingkasan.getCell(`${col}${rRow}`).fill = emphasizedFill;
@@ -973,6 +1031,72 @@ export default function Laporan() {
     });
 
     // ============================================
+    // SHEET 6: Pengeluaran Harian
+    // ============================================
+    const wsPengeluaran = wb.addWorksheet('Pengeluaran Harian', { views: [{ state: 'frozen', ySplit: 1 }] });
+    wsPengeluaran.columns = [
+      { header: 'No', key: 'no', width: 6 },
+      { header: 'Tanggal', key: 'date', width: 22 },
+      { header: 'Keperluan', key: 'purpose', width: 42 },
+      { header: 'Nominal', key: 'amount', width: 18, style: { numFmt: currencyFormat } },
+    ];
+    wsPengeluaran.getRow(1).eachCell(cell => {
+      cell.style = headerStyle;
+    });
+    wsPengeluaran.autoFilter = 'A1:D1';
+
+    (dailyExpenses ?? []).forEach((expense, index) => {
+      const row = wsPengeluaran.addRow({
+        no: index + 1,
+        date: format(new Date(expense.date), 'dd-MM-yyyy HH:mm', { locale: localeId }),
+        purpose: expense.purpose,
+        amount: expense.amount,
+      });
+      row.eachCell(cell => { cell.border = cellBorder; });
+    });
+
+    const expenseTotalRow = wsPengeluaran.addRow({
+      no: 'Total',
+      amount: totalOperationalExpenses,
+    });
+    wsPengeluaran.mergeCells(`A${expenseTotalRow.number}:C${expenseTotalRow.number}`);
+    expenseTotalRow.getCell('A').alignment = { horizontal: 'right', vertical: 'middle' };
+    expenseTotalRow.eachCell(cell => {
+      cell.border = cellBorder;
+      cell.font = { bold: true };
+      cell.fill = subtotalFill;
+    });
+
+    // ============================================
+    // SHEET 7: Pemakaian Stok Barang
+    // ============================================
+    const wsPemakaian = wb.addWorksheet('Pemakaian Stok Barang', { views: [{ state: 'frozen', ySplit: 1 }] });
+    wsPemakaian.columns = [
+      { header: 'No', key: 'no', width: 6 },
+      { header: 'Tanggal', key: 'date', width: 22 },
+      { header: 'Nama Bahan', key: 'name', width: 32 },
+      { header: 'Jumlah Pakai', key: 'qty', width: 16 },
+      { header: 'Satuan', key: 'unit', width: 12 },
+      { header: 'Keperluan', key: 'purpose', width: 38 },
+    ];
+    wsPemakaian.getRow(1).eachCell(cell => {
+      cell.style = headerStyle;
+    });
+    wsPemakaian.autoFilter = 'A1:F1';
+
+    (warehouseUsageLogs ?? []).forEach((log, index) => {
+      const row = wsPemakaian.addRow({
+        no: index + 1,
+        date: format(new Date(log.date), 'dd-MM-yyyy HH:mm', { locale: localeId }),
+        name: log.warehouseItemName,
+        qty: log.quantity,
+        unit: log.unit,
+        purpose: log.purpose,
+      });
+      row.eachCell(cell => { cell.border = cellBorder; });
+    });
+
+    // ============================================
     // Trigger download
     // ============================================
     const fileName = `Laporan_${storeName.replace(/\s+/g, '_')}_${format(new Date(), 'yyyyMMdd_HHmm')}.xlsx`;
@@ -1063,7 +1187,7 @@ export default function Laporan() {
       )}
 
       {/* Summary */}
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
         <Card className="border-0 shadow-sm">
           <CardContent className="p-3 text-center">
             <ShoppingCart className="w-4 h-4 mx-auto text-primary mb-1" />
@@ -1082,7 +1206,21 @@ export default function Laporan() {
           <CardContent className="p-3 text-center">
             <TrendingUp className="w-4 h-4 mx-auto text-accent mb-1" />
             <p className="text-sm font-bold">{rp(totalProfit)}</p>
-            <p className="text-[10px] text-muted-foreground">Profit</p>
+            <p className="text-[10px] text-muted-foreground">Laba Kotor</p>
+          </CardContent>
+        </Card>
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-3 text-center">
+            <ArrowDown className="w-4 h-4 mx-auto text-destructive mb-1" />
+            <p className="text-sm font-bold">{rp(totalOperationalExpenses)}</p>
+            <p className="text-[10px] text-muted-foreground">Pengeluaran</p>
+          </CardContent>
+        </Card>
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-3 text-center">
+            <DollarSign className="w-4 h-4 mx-auto text-success mb-1" />
+            <p className="text-sm font-bold">{rp(netProfitAfterExpenses)}</p>
+            <p className="text-[10px] text-muted-foreground">Laba Bersih</p>
           </CardContent>
         </Card>
       </div>
@@ -1127,6 +1265,21 @@ export default function Laporan() {
             <span className="font-bold">Laba Kotor</span>
             <span className={`font-bold ${grossProfit >= 0 ? 'text-success' : 'text-destructive'}`}>
               {rp(grossProfit)}
+            </span>
+          </div>
+          {totalOperationalExpenses > 0 && (
+            <div className="flex justify-between items-center text-sm text-destructive">
+              <div className="flex items-center gap-2">
+                <Minus className="w-3.5 h-3.5" />
+                <span>Pengeluaran Operasional</span>
+              </div>
+              <span className="font-semibold">-{rp(totalOperationalExpenses)}</span>
+            </div>
+          )}
+          <div className="flex justify-between items-center text-base border-t pt-2">
+            <span className="font-bold">Laba Bersih</span>
+            <span className={`font-bold ${netProfitAfterExpenses >= 0 ? 'text-success' : 'text-destructive'}`}>
+              {rp(netProfitAfterExpenses)}
             </span>
           </div>
           <div className="flex justify-between items-center text-xs text-muted-foreground">
@@ -1185,6 +1338,66 @@ export default function Laporan() {
           )}
         </CardContent>
       </Card>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="border-0 shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-1.5">
+              <DollarSign className="w-4 h-4" />
+              Pengeluaran Harian
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {recentExpenses.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-4 text-center">Belum ada pengeluaran pada periode ini</p>
+            ) : (
+              <div className="space-y-2">
+                {recentExpenses.map(expense => (
+                  <div key={expense.id} className="flex items-center justify-between gap-3 border-b last:border-0 pb-2 last:pb-0">
+                    <div className="min-w-0">
+                      <p className="text-sm break-words">{expense.purpose}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {format(new Date(expense.date), 'dd MMM yyyy HH:mm', { locale: localeId })}
+                      </p>
+                    </div>
+                    <p className="text-xs font-bold shrink-0">{rp(expense.amount)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-0 shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-1.5">
+              <PackageMinus className="w-4 h-4" />
+              Pemakaian Stok Manual
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {recentUsageLogs.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-4 text-center">Belum ada pemakaian stok manual pada periode ini</p>
+            ) : (
+              <div className="space-y-2">
+                {recentUsageLogs.map(log => (
+                  <div key={log.id} className="flex items-center justify-between gap-3 border-b last:border-0 pb-2 last:pb-0">
+                    <div className="min-w-0">
+                      <p className="text-sm break-words">{log.warehouseItemName}</p>
+                      <p className="text-[10px] text-muted-foreground break-words">
+                        {log.quantity} {log.unit} · {log.purpose}
+                      </p>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground shrink-0">
+                      {format(new Date(log.date), 'dd MMM HH:mm', { locale: localeId })}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Laporan Stok Bahan */}
       <Card className="border-0 shadow-sm">

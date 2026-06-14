@@ -26,6 +26,7 @@ const loadTransactionHistory = () => import("./pages/TransactionHistory");
 const loadStockReport = () => import("./pages/StockReport");
 const loadUsersPage = () => import("./pages/Users");
 const loadWarehousePage = () => import("./pages/Warehouse");
+const loadDailyExpensesPage = () => import("./pages/DailyExpenses");
 const loadNotFound = () => import("./pages/NotFound");
 
 const Dashboard = lazy(loadDashboard);
@@ -40,6 +41,7 @@ const TransactionHistory = lazy(loadTransactionHistory);
 const StockReport = lazy(loadStockReport);
 const UsersPage = lazy(loadUsersPage);
 const WarehousePage = lazy(loadWarehousePage);
+const DailyExpensesPage = lazy(loadDailyExpensesPage);
 const NotFound = lazy(loadNotFound);
 
 const App = () => {
@@ -86,6 +88,7 @@ const App = () => {
         loadReports(),
         loadTransactionHistory(),
         loadWarehousePage(),
+        loadDailyExpensesPage(),
         loadSettings(),
       ]);
     };
@@ -130,6 +133,7 @@ const App = () => {
                   <Route path="/stock-report" element={<StockReport />} />
                   <Route path="/users" element={<UsersPage />} />
                   <Route path="/warehouse" element={<WarehousePage />} />
+                  <Route path="/daily-expenses" element={<DailyExpensesPage />} />
                 </Route>
                 <Route path="*" element={<NotFound />} />
               </Routes>

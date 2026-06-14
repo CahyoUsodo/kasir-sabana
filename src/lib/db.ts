@@ -264,6 +264,26 @@ export interface DailyPrepFormula {
   factor: number;        // Quantity added per 1 unit of prepItem
 }
 
+export interface DailyExpense {
+  id?: number;
+  amount: number;
+  purpose: string;
+  notes?: string;
+  date: Date;
+  createdAt: Date;
+}
+
+export interface WarehouseUsageLog {
+  id?: number;
+  warehouseItemId: number;
+  warehouseItemName: string;
+  quantity: number;
+  unit: string;
+  purpose: string;
+  date: Date;
+  createdAt: Date;
+}
+
 export function getActiveDailyPrepFormulas(
   formulas: DailyPrepFormula[] = [],
   warehouseItems: WarehouseItem[] = []
@@ -304,6 +324,8 @@ class PosDatabase extends Dexie {
   productOptions!: Table<ProductOption>;
   productOptionRecipes!: Table<ProductOptionRecipe>;
   dailyPrepFormulas!: Table<DailyPrepFormula>;
+  dailyExpenses!: Table<DailyExpense>;
+  warehouseUsageLogs!: Table<WarehouseUsageLog>;
 
   constructor() {
     super('kasirgratisan-db');
@@ -694,7 +716,7 @@ class PosDatabase extends Dexie {
       productOptionGroups: '++id, productId, isDeleted, [productId+sortOrder]',
       productOptions: '++id, groupId, isDeleted, [groupId+sortOrder]',
       productOptionRecipes: '++id, optionId, warehouseItemId, [optionId+warehouseItemId]',
-    }).upgrade(async (tx) => {
+      }).upgrade(async (tx) => {
       const groupTable = tx.table('productOptionGroups');
       const productTable = tx.table('products');
       const optionTable = tx.table('productOptions');
@@ -716,6 +738,29 @@ class PosDatabase extends Dexie {
 
         group.pricingMode = looksLikePackagePriceSelector ? 'override' : 'add';
       });
+      });
+
+    this.version(14).stores({
+      categories:       '++id, name, isDeleted',
+      products:         '++id, name, &sku, categoryId, barcode, isDeleted, createdBy, updatedBy',
+      suppliers:        '++id, name, isDeleted',
+      stockIns:         '++id, productId, supplierId, date, createdBy',
+      stockOuts:        '++id, productId, date, createdBy',
+      hppHistory:       '++id, productId, date',
+      paymentMethods:   '++id, name, category',
+      transactions:     '++id, date, &receiptNumber, paymentMethodId, status, orderNumber, createdBy',
+      transactionItems: '++id, transactionId, productId, stockKey',
+      storeSettings:    '++id',
+      units:            '++id, &name, isDeleted',
+      users:            '++id, &username, role, isActive',
+      warehouseItems:   '++id, name, isDeleted, isCashierVisible, isDailyReset',
+      productRecipes:   '++id, productId, warehouseItemId, [productId+warehouseItemId]',
+      dailyPrepFormulas: '++id, prepItemId, targetItemId, [prepItemId+targetItemId]',
+      productOptionGroups: '++id, productId, isDeleted, [productId+sortOrder]',
+      productOptions: '++id, groupId, isDeleted, [groupId+sortOrder]',
+      productOptionRecipes: '++id, optionId, warehouseItemId, [optionId+warehouseItemId]',
+      dailyExpenses: '++id, date, createdAt',
+      warehouseUsageLogs: '++id, warehouseItemId, date, createdAt',
     });
   }
 }
@@ -748,6 +793,99 @@ export async function upsertProductOptionRecipe(optionId: number, warehouseItemI
   }
 
   return db.productOptionRecipes.add({ optionId, warehouseItemId, quantity });
+}
+
+export async function recordDailyExpense(input: {
+  amount: number;
+  purpose: string;
+  notes?: string;
+  date?: Date;
+}) {
+  const amount = Number(input.amount) || 0;
+  const purpose = input.purpose.trim();
+
+  if (amount <= 0) {
+    throw new Error('Nominal pengeluaran harus lebih dari 0');
+  }
+
+  if (!purpose) {
+    throw new Error('Keperluan pengeluaran wajib diisi');
+  }
+
+  const now = new Date();
+  return db.dailyExpenses.add({
+    amount,
+    purpose,
+    notes: input.notes?.trim(),
+    date: input.date || now,
+    createdAt: now,
+  });
+}
+
+export async function deleteDailyExpenseEntry(expenseId: number) {
+  return db.dailyExpenses.delete(expenseId);
+}
+
+export async function recordWarehouseUsage(input: {
+  warehouseItemId: number;
+  quantity: number;
+  purpose: string;
+  date?: Date;
+}) {
+  const quantity = Number(input.quantity) || 0;
+  const purpose = input.purpose.trim();
+
+  if (quantity <= 0) {
+    throw new Error('Jumlah pemakaian harus lebih dari 0');
+  }
+
+  if (!purpose) {
+    throw new Error('Keperluan pemakaian stok wajib diisi');
+  }
+
+  return db.transaction('rw', [db.warehouseItems, db.warehouseUsageLogs], async () => {
+    const item = await db.warehouseItems.get(input.warehouseItemId);
+    if (!item || item.isDeleted === 1) {
+      throw new Error('Barang gudang tidak ditemukan');
+    }
+
+    if (item.stock < quantity) {
+      throw new Error(`Stok ${item.name} tidak cukup`);
+    }
+
+    const now = new Date();
+    await db.warehouseItems.update(item.id!, {
+      stock: item.stock - quantity,
+      updatedAt: now,
+    });
+
+    return db.warehouseUsageLogs.add({
+      warehouseItemId: item.id!,
+      warehouseItemName: item.name,
+      quantity,
+      unit: item.unit,
+      purpose,
+      date: input.date || now,
+      createdAt: now,
+    });
+  });
+}
+
+export async function revertWarehouseUsageLog(logId: number) {
+  return db.transaction('rw', [db.warehouseItems, db.warehouseUsageLogs], async () => {
+    const log = await db.warehouseUsageLogs.get(logId);
+    if (!log) return;
+
+    const item = await db.warehouseItems.get(log.warehouseItemId);
+    if (item && item.isDeleted !== 1) {
+      await db.warehouseItems.update(item.id!, {
+        stock: item.stock + log.quantity,
+        updatedAt: new Date(),
+      });
+    }
+
+    await db.warehouseUsageLogs.delete(logId);
+  });
 }
 
 export async function getProductOptionConfig(productId: number) {
