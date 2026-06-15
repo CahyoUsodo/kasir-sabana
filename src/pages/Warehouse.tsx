@@ -635,6 +635,8 @@ export default function WarehousePage() {
     return () => window.clearTimeout(timeoutId);
   }, [searchParams, activeTab, filteredStockItems, mainPrepItems]);
 
+  const highlightedItemId = searchParams.get('itemId');
+
   // Render main body
   return (
     <div className="px-4 pt-6 pb-24 space-y-5">
@@ -710,7 +712,14 @@ export default function WarehousePage() {
             {filteredStockItems.map(item => {
               const meta = getItemMeta(item);
               return (
-                <Card id={`warehouse-stock-item-${item.id}`} key={item.id} className="border-0 shadow-sm overflow-hidden">
+                <Card
+                  id={`warehouse-stock-item-${item.id}`}
+                  key={item.id}
+                  className={cn(
+                    "border-0 shadow-sm overflow-hidden transition-all",
+                    highlightedItemId === String(item.id) && "ring-2 ring-primary ring-offset-2 bg-primary/5"
+                  )}
+                >
                   <CardContent className="p-4 flex items-center justify-between">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="w-12 h-12 rounded-lg bg-muted border flex items-center justify-center overflow-hidden shrink-0">
@@ -870,7 +879,14 @@ export default function WarehousePage() {
               const itemFormulas = activeFormulas.filter(f => f.prepItemId === item.id);
 
               return (
-                <Card id={`warehouse-daily-item-${item.id}`} key={item.id} className="border-0 shadow-sm overflow-hidden">
+                <Card
+                  id={`warehouse-daily-item-${item.id}`}
+                  key={item.id}
+                  className={cn(
+                    "border-0 shadow-sm overflow-hidden transition-all",
+                    highlightedItemId === String(item.id) && "ring-2 ring-primary ring-offset-2 bg-primary/5"
+                  )}
+                >
                   <CardHeader className="p-4 pb-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-3">

@@ -1,8 +1,8 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Product, type Category, type ProductOption, type ProductOptionGroup, autoLinkChickenRecipes, upsertProductOptionRecipe, duplicateProduct, getDefaultOptionIdsForProduct } from '@/lib/db';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, Package as PackageIcon, Camera, X, Settings2, Layers, Link as LinkIcon, Copy } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
-import { cn } from '@/lib/utils';
+import { cn, formatNumberInput, parseFormattedNumber } from '@/lib/utils';
 import { compressImage } from '@/lib/image-utils';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/use-auth';
@@ -21,6 +21,7 @@ export default function Produk() {
   const { currentUser, can } = useAuth();
   const canManage = can('manage_products');
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState<string>('all');
@@ -186,6 +187,23 @@ export default function Produk() {
     };
   }).sort(compareAdminProducts);
 
+  const highlightedProductId = searchParams.get('productId');
+
+  useEffect(() => {
+    if (!highlightedProductId) return;
+    setSearch('');
+    setFilterCategory('all');
+
+    const timeoutId = window.setTimeout(() => {
+      const target = document.getElementById(`product-card-${highlightedProductId}`);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 150);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [highlightedProductId]);
+
   const hasProductOptions = (productId?: number) => getProductGroups(productId).length > 0;
   const getProductOptionCount = (productId?: number) =>
     getProductGroups(productId).reduce((total, group) => total + getGroupOptions(group.id).length, 0);
@@ -296,7 +314,7 @@ export default function Produk() {
 
   const openEdit = (p: Product) => {
     setEditProduct(p);
-    setName(p.name); setSku(p.sku); setCategoryId(p.categoryId.toString()); setPrice(p.price.toString()); setHpp(p.hpp.toString()); setStock(p.stock.toString()); setUnit(p.unit); setBarcode(p.barcode ?? ''); setDescription(p.description ?? ''); setPhoto(p.photo);
+    setName(p.name); setSku(p.sku); setCategoryId(p.categoryId.toString()); setPrice(formatNumberInput(p.price)); setHpp(formatNumberInput(p.hpp)); setStock(p.stock.toString()); setUnit(p.unit); setBarcode(p.barcode ?? ''); setDescription(p.description ?? ''); setPhoto(p.photo);
     setDialogOpen(true);
   };
 
@@ -501,8 +519,8 @@ export default function Produk() {
       name: name.trim(),
       sku: sku.trim(),
       categoryId: Number(categoryId),
-      price: Number(price) || 0,
-      hpp: Number(hpp) || 0,
+      price: parseFormattedNumber(price),
+      hpp: parseFormattedNumber(hpp),
       stock: editProduct?.id && isLinkedToRecipe ? editProduct.stock : (Number(stock) || 0),
       unit: unit.trim() || 'pcs',
       description: description.trim() || undefined,
@@ -627,7 +645,14 @@ export default function Produk() {
       ) : (
         <div className="space-y-2">
           {filtered.map(p => (
-            <Card key={p.id} className="border-0 shadow-sm">
+            <Card
+              key={p.id}
+              id={`product-card-${p.id}`}
+              className={cn(
+                'border-0 shadow-sm transition-all',
+                highlightedProductId === String(p.id) && 'ring-2 ring-primary ring-offset-2 bg-primary/5'
+              )}
+            >
               <CardContent className="p-3">
                 {(() => {
                   const recipeCount = getProductRecipeCount(p.id);
@@ -800,11 +825,11 @@ export default function Produk() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Harga Jual *</Label>
-                <Input type="number" value={price} onChange={e => setPrice(e.target.value)} placeholder="15000" className="h-11" />
+                <Input type="text" inputMode="numeric" value={price} onChange={e => setPrice(formatNumberInput(e.target.value))} placeholder="15.000" className="h-11" />
               </div>
               <div className="space-y-1.5">
                 <Label>HPP</Label>
-                <Input type="number" value={hpp} onChange={e => setHpp(e.target.value)} placeholder="10000" className="h-11" />
+                <Input type="text" inputMode="numeric" value={hpp} onChange={e => setHpp(formatNumberInput(e.target.value))} placeholder="10.000" className="h-11" />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">

@@ -16,3 +16,16 @@ export function generateUUID(): string {
     return v.toString(16);
   });
 }
+
+export function parseFormattedNumber(value?: string): number {
+  if (!value) return 0;
+  const normalized = value.replace(/[^\d]/g, "");
+  return Number(normalized || "0");
+}
+
+export function formatNumberInput(value?: string | number): string {
+  if (value === null || value === undefined) return "";
+  const numericValue = typeof value === "number" ? value : parseFormattedNumber(value);
+  if (!numericValue) return "";
+  return numericValue.toLocaleString("id-ID");
+}

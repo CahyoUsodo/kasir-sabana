@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
+import { formatNumberInput, parseFormattedNumber } from '@/lib/utils';
 
 export default function DailyExpensesPage() {
   const { can } = useAuth();
@@ -80,7 +81,7 @@ export default function DailyExpensesPage() {
   const submitDailyExpense = async () => {
     try {
       await recordDailyExpense({
-        amount: parseFloat(expenseAmount) || 0,
+        amount: parseFormattedNumber(expenseAmount),
         purpose: expensePurpose,
       });
       setExpenseAmount('');
@@ -154,11 +155,11 @@ export default function DailyExpensesPage() {
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold">Nominal</Label>
                 <Input
-                  type="number"
-                  min={0}
+                  type="text"
+                  inputMode="numeric"
                   placeholder="Contoh: 25000"
                   value={expenseAmount}
-                  onChange={e => setExpenseAmount(e.target.value)}
+                  onChange={e => setExpenseAmount(formatNumberInput(e.target.value))}
                   className="h-10"
                 />
               </div>
@@ -174,7 +175,7 @@ export default function DailyExpensesPage() {
             </div>
             <Button
               onClick={submitDailyExpense}
-              disabled={(parseFloat(expenseAmount) || 0) <= 0 || !expensePurpose.trim()}
+              disabled={parseFormattedNumber(expenseAmount) <= 0 || !expensePurpose.trim()}
               className="w-full h-10 text-xs font-semibold"
             >
               Simpan Pengeluaran

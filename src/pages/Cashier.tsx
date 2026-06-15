@@ -28,6 +28,8 @@ interface CartItem {
   notes?: string;
 }
 
+const CASHIER_DRAFT_KEY = 'kasir-draft-v1';
+
 export default function Kasir() {
   const { currentUser, can } = useAuth();
   const navigate = useNavigate();
@@ -73,6 +75,7 @@ export default function Kasir() {
   const [prepCounts, setPrepCounts] = useState<Record<number, string>>({});
   const [optionProduct, setOptionProduct] = useState<Product | null>(null);
   const [selectedOptionIds, setSelectedOptionIds] = useState<Record<number, number[]>>({});
+  const draftRestoredRef = useRef(false);
 
   const products = useLiveQuery(() => db.products.where('isDeleted').equals(0).toArray());
   const categories = useLiveQuery(() => db.categories.where('isDeleted').equals(0).toArray());
@@ -473,6 +476,39 @@ export default function Kasir() {
     }
   }, [editTxIdParam, editingTxId]);
 
+  useEffect(() => {
+    if (draftRestoredRef.current || editTxIdParam) return;
+    draftRestoredRef.current = true;
+
+    try {
+      const rawDraft = window.localStorage.getItem(CASHIER_DRAFT_KEY);
+      if (!rawDraft) return;
+      const draft = JSON.parse(rawDraft);
+
+      setCart(draft.cart ?? []);
+      setEditingTxId(draft.editingTxId ?? null);
+      setOriginalTx(draft.originalTx ? {
+        ...draft.originalTx,
+        date: new Date(draft.originalTx.date),
+        openedAt: draft.originalTx.openedAt ? new Date(draft.originalTx.openedAt) : undefined,
+        closedAt: draft.originalTx.closedAt ? new Date(draft.originalTx.closedAt) : undefined,
+      } : null);
+      setOriginalItems(draft.originalItems ?? []);
+      setOriginalQuantities(draft.originalQuantities ?? {});
+      setServiceType(draft.serviceType ?? 'dine_in');
+      setTxDiscountType(draft.txDiscountType ?? null);
+      setTxDiscountValue(draft.txDiscountValue ?? '');
+      setPaymentMethodId(draft.paymentMethodId ?? '');
+      setPaymentAmount(draft.paymentAmount ?? '');
+      setCustomerName(draft.customerName ?? '');
+      setTableNumber(draft.tableNumber ?? '');
+      setRemarks(draft.remarks ?? '');
+    } catch (error) {
+      console.error('Failed to restore cashier draft', error);
+      window.localStorage.removeItem(CASHIER_DRAFT_KEY);
+    }
+  }, [editTxIdParam]);
+
   const todayStr = new Date().toLocaleDateString('en-CA');
   const activeDailyPrepFormulas = getActiveDailyPrepFormulas(dailyPrepFormulas ?? [], visibleWarehouseItems ?? []);
   const mainPrepItems = getMainDailyPrepItems(visibleWarehouseItems ?? [], activeDailyPrepFormulas);
@@ -627,12 +663,57 @@ export default function Kasir() {
   const filtered = allAvailableProducts.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase());
     const matchCategory = filterCategory === 'all' || p.categoryId === Number(filterCategory);
-    const baseStockKey = buildStockKey(p.id!);
-    const origQty = originalQuantities[baseStockKey] || 0;
-    const allowedStock = p.stock + origQty;
-    const hasConfigOptions = getProductGroups(p.id).length > 0;
-    return matchSearch && matchCategory && (hasConfigOptions || allowedStock > 0 || cartProductIds.has(baseStockKey));
+    return matchSearch && matchCategory;
   }).sort(compareCashierProducts);
+
+  useEffect(() => {
+    if (!draftRestoredRef.current && !editTxIdParam) return;
+
+    const shouldClearDraft =
+      cart.length === 0 &&
+      editingTxId === null &&
+      !customerName.trim() &&
+      !tableNumber.trim() &&
+      !remarks.trim() &&
+      !txDiscountValue &&
+      !paymentMethodId &&
+      !paymentAmount;
+
+    if (shouldClearDraft) {
+      window.localStorage.removeItem(CASHIER_DRAFT_KEY);
+      return;
+    }
+
+    window.localStorage.setItem(CASHIER_DRAFT_KEY, JSON.stringify({
+      cart,
+      editingTxId,
+      originalTx,
+      originalItems,
+      originalQuantities,
+      serviceType,
+      txDiscountType,
+      txDiscountValue,
+      paymentMethodId,
+      paymentAmount,
+      customerName,
+      tableNumber,
+      remarks,
+    }));
+  }, [
+    cart,
+    editingTxId,
+    originalTx,
+    originalItems,
+    originalQuantities,
+    serviceType,
+    txDiscountType,
+    txDiscountValue,
+    paymentMethodId,
+    paymentAmount,
+    customerName,
+    tableNumber,
+    remarks,
+  ]);
 
   const doFullReset = () => {
     setCart([]);
@@ -652,6 +733,7 @@ export default function Kasir() {
     if (searchParams.has('editTxId')) {
       setSearchParams({}, { replace: true });
     }
+    window.localStorage.removeItem(CASHIER_DRAFT_KEY);
   };
   doFullResetRef.current = doFullReset;
 
@@ -707,6 +789,15 @@ export default function Kasir() {
       return;
     }
     void addConfiguredToCart(product);
+  };
+
+  const handleUnavailableProductClick = (product: Product) => {
+    if ((product.id ?? 0) < 0) {
+      navigate(`/warehouse?tab=stok&filter=cashier&itemId=${Math.abs(product.id!)}`);
+      return;
+    }
+
+    navigate(`/products?productId=${product.id}`);
   };
 
   const confirmOptionProduct = () => {
@@ -1059,9 +1150,26 @@ export default function Kasir() {
           </div>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-            {filtered.map(p => (
-              <Card key={p.id} className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow active:scale-[0.98]" onClick={() => addToCart(p)}>
-                <CardContent className="p-0">
+            {filtered.map(p => {
+              const isOutOfStock = p.stock <= 0 && !cartProductIds.has(buildStockKey(p.id!));
+
+              return (
+              <Card
+                key={p.id}
+                className={cn(
+                  "border-0 shadow-sm transition-all active:scale-[0.98]",
+                  isOutOfStock
+                    ? "cursor-pointer bg-muted/60 grayscale hover:shadow-sm"
+                    : "cursor-pointer hover:shadow-md"
+                )}
+                onClick={() => isOutOfStock ? handleUnavailableProductClick(p) : addToCart(p)}
+              >
+                <CardContent className="p-0 relative">
+                  {isOutOfStock && (
+                    <div className="absolute inset-x-2 top-2 z-10 rounded-full bg-muted-foreground/85 px-2 py-1 text-center text-[10px] font-semibold text-background">
+                      Stok habis • buka produk
+                    </div>
+                  )}
                   <div className="w-full aspect-square bg-muted rounded-t-lg overflow-hidden flex items-center justify-center">
                     {p.photo ? (
                       <img src={p.photo} alt={p.name} className="w-full h-full object-cover" />
@@ -1077,11 +1185,13 @@ export default function Kasir() {
                         {p.description}
                       </p>
                     )}
-                    <p className="text-[10px] text-muted-foreground mt-0.5">Stok: {p.stock} {p.unit}</p>
+                    <p className={cn("text-[10px] mt-0.5", isOutOfStock ? "text-destructive font-semibold" : "text-muted-foreground")}>
+                      {isOutOfStock ? `Stok habis` : `Stok: ${p.stock} ${p.unit}`}
+                    </p>
                   </div>
                 </CardContent>
               </Card>
-            ))}
+            )})}
           </div>
         )}
         </div>

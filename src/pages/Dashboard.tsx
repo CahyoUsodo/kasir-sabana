@@ -84,17 +84,9 @@ export default function Dashboard() {
       });
     }
 
-    for (const item of visibleWarehouseItems.filter(wi => wi.isCashierVisible === 1)) {
-      upsert({
-        id: `warehouse-${item.id}`,
-        name: item.name,
-        stock: item.stock,
-        unit: item.unit,
-        priority: 4,
-      });
-    }
-
-    return Array.from(merged.values()).filter(item => item.stock <= 5);
+    return Array.from(merged.values())
+      .filter(item => item.stock <= 5)
+      .sort((a, b) => a.stock - b.stock || a.name.localeCompare(b.name, 'id'));
   }, []);
 
   const recentTransactions = useLiveQuery(async () => {
@@ -284,14 +276,16 @@ export default function Dashboard() {
           </h2>
           <div className="space-y-2">
             {lowStockProducts.slice(0, 5).map(product => (
-              <Card key={product.id} className="border-0 shadow-sm">
-                <CardContent className="p-3 flex items-center justify-between">
-                  <span className="text-sm font-medium">{product.name}</span>
-                  <span className="text-xs font-bold text-destructive bg-destructive/10 px-2 py-1 rounded-full">
-                    Sisa {product.stock} {product.unit}
-                  </span>
-                </CardContent>
-              </Card>
+              <Link key={product.id} to={`/products?productId=${product.id.replace('product-', '')}`}>
+                <Card className="border-0 shadow-sm hover:shadow-md transition-shadow">
+                  <CardContent className="p-3 flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium">{product.name}</span>
+                    <span className="text-xs font-bold text-destructive bg-destructive/10 px-2 py-1 rounded-full shrink-0">
+                      {product.stock <= 0 ? `Habis` : `Sisa ${product.stock} ${product.unit}`}
+                    </span>
+                  </CardContent>
+                </Card>
+              </Link>
             ))}
           </div>
         </div>
