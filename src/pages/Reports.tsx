@@ -101,6 +101,15 @@ export default function Laporan() {
   const marginPercent = netSales > 0 ? (grossProfit / netSales * 100) : 0;
   const totalOperationalExpenses = (dailyExpenses ?? []).reduce((sum, item) => sum + item.amount, 0);
   const netProfitAfterExpenses = grossProfit - totalOperationalExpenses;
+  const serviceTypeBreakdown = (transactions ?? []).reduce<Record<'dine_in' | 'take_away', { count: number; total: number }>>((acc, tx) => {
+    const serviceType = tx.serviceType === 'take_away' ? 'take_away' : 'dine_in';
+    acc[serviceType].count += 1;
+    acc[serviceType].total += tx.total;
+    return acc;
+  }, {
+    dine_in: { count: 0, total: 0 },
+    take_away: { count: 0, total: 0 },
+  });
 
   const txDiscountInfo: Record<number, { extraDiscount: number; itemSubtotalSum: number }> = {};
   transactions?.forEach(t => {
@@ -260,7 +269,8 @@ export default function Laporan() {
       normalized.includes('ice cream') ||
       normalized.includes('coca cola') ||
       normalized.includes('fanta') ||
-      normalized.includes('sprite')
+      normalized.includes('sprite') ||
+      normalized.includes('air mineral')
     ) return 'Minuman';
 
     if (
@@ -678,6 +688,70 @@ export default function Laporan() {
       ['M','N'].forEach(col => wsRingkasan.getCell(`${col}${i}`).border = { top: cellBorder.top, bottom: cellBorder.bottom, left: col==='M'?cellBorder.left:undefined, right: col==='N'?cellBorder.right:undefined });
     }
 
+    // Tipe Layanan Table
+    const serviceHeaderRow = pRow + 2;
+    wsRingkasan.mergeCells(`H${serviceHeaderRow}:N${serviceHeaderRow}`);
+    wsRingkasan.getCell(`H${serviceHeaderRow}`).value = 'TIPE LAYANAN';
+    wsRingkasan.getCell(`H${serviceHeaderRow}`).style = headerStyle;
+
+    const serviceLabelRow = serviceHeaderRow + 1;
+    wsRingkasan.mergeCells(`H${serviceLabelRow}:I${serviceLabelRow}`); wsRingkasan.getCell(`H${serviceLabelRow}`).value = 'Tipe';
+    wsRingkasan.getCell(`J${serviceLabelRow}`).value = 'Jml Trx';
+    wsRingkasan.mergeCells(`K${serviceLabelRow}:L${serviceLabelRow}`); wsRingkasan.getCell(`K${serviceLabelRow}`).value = 'Total';
+    wsRingkasan.mergeCells(`M${serviceLabelRow}:N${serviceLabelRow}`); wsRingkasan.getCell(`M${serviceLabelRow}`).value = 'Persentase';
+    ['H','J','K','M'].forEach(c => {
+      wsRingkasan.getCell(`${c}${serviceLabelRow}`).style = headerStyle;
+    });
+
+    const serviceRows = [
+      { label: 'Dine In', data: serviceTypeBreakdown.dine_in },
+      { label: 'Take Away', data: serviceTypeBreakdown.take_away },
+    ];
+
+    let serviceRow = serviceLabelRow + 1;
+    serviceRows.forEach(({ label, data }) => {
+      wsRingkasan.mergeCells(`H${serviceRow}:I${serviceRow}`);
+      wsRingkasan.getCell(`H${serviceRow}`).value = label;
+      wsRingkasan.getCell(`J${serviceRow}`).value = data.count;
+      wsRingkasan.getCell(`J${serviceRow}`).alignment = { horizontal: 'center' };
+
+      wsRingkasan.mergeCells(`K${serviceRow}:L${serviceRow}`);
+      wsRingkasan.getCell(`K${serviceRow}`).value = data.total;
+      wsRingkasan.getCell(`K${serviceRow}`).numFmt = currencyFormat;
+      wsRingkasan.getCell(`K${serviceRow}`).alignment = { horizontal: 'center' };
+
+      wsRingkasan.mergeCells(`M${serviceRow}:N${serviceRow}`);
+      wsRingkasan.getCell(`M${serviceRow}`).value = txCount > 0 ? data.count / txCount : 0;
+      wsRingkasan.getCell(`M${serviceRow}`).numFmt = percentFormat;
+      wsRingkasan.getCell(`M${serviceRow}`).alignment = { horizontal: 'center' };
+      serviceRow++;
+    });
+
+    wsRingkasan.mergeCells(`H${serviceRow}:I${serviceRow}`);
+    wsRingkasan.getCell(`H${serviceRow}`).value = 'TOTAL';
+    wsRingkasan.getCell(`J${serviceRow}`).value = txCount;
+    wsRingkasan.getCell(`J${serviceRow}`).alignment = { horizontal: 'center' };
+    wsRingkasan.mergeCells(`K${serviceRow}:L${serviceRow}`);
+    wsRingkasan.getCell(`K${serviceRow}`).value = totalRevenue;
+    wsRingkasan.getCell(`K${serviceRow}`).numFmt = currencyFormat;
+    wsRingkasan.getCell(`K${serviceRow}`).alignment = { horizontal: 'center' };
+    wsRingkasan.mergeCells(`M${serviceRow}:N${serviceRow}`);
+    wsRingkasan.getCell(`M${serviceRow}`).value = 1;
+    wsRingkasan.getCell(`M${serviceRow}`).numFmt = percentFormat;
+    wsRingkasan.getCell(`M${serviceRow}`).alignment = { horizontal: 'center' };
+
+    ['H','J','K','M'].forEach(col => {
+      wsRingkasan.getCell(`${col}${serviceRow}`).font = { bold: true, color: { argb: 'FFB42829' } };
+      wsRingkasan.getCell(`${col}${serviceRow}`).fill = subtotalFill;
+    });
+
+    for (let i = serviceLabelRow; i <= serviceRow; i++) {
+      ['H','I'].forEach(col => wsRingkasan.getCell(`${col}${i}`).border = { top: cellBorder.top, bottom: cellBorder.bottom, left: col==='H'?cellBorder.left:undefined, right: col==='I'?cellBorder.right:undefined });
+      wsRingkasan.getCell(`J${i}`).border = cellBorder;
+      ['K','L'].forEach(col => wsRingkasan.getCell(`${col}${i}`).border = { top: cellBorder.top, bottom: cellBorder.bottom, left: col==='K'?cellBorder.left:undefined, right: col==='L'?cellBorder.right:undefined });
+      ['M','N'].forEach(col => wsRingkasan.getCell(`${col}${i}`).border = { top: cellBorder.top, bottom: cellBorder.bottom, left: col==='M'?cellBorder.left:undefined, right: col==='N'?cellBorder.right:undefined });
+    }
+
     // ============================================
     // SHEET 2: Detail Transaksi
     // ============================================
@@ -687,6 +761,7 @@ export default function Laporan() {
       { header: 'Tanggal', key: 'date', width: 20 },
       { header: 'No Struk', key: 'receipt', width: 22 },
       { header: 'Metode Pembayaran', key: 'payment', width: 22 },
+      { header: 'Tipe Layanan', key: 'serviceType', width: 18 },
       { header: 'Pendapatan Kotor', key: 'gross', width: 22, style: { numFmt: currencyFormat } },
       { header: 'Diskon', key: 'discount', width: 15, style: { numFmt: currencyFormat } },
       { header: 'Penjualan Bersih', key: 'net', width: 22, style: { numFmt: currencyFormat } },
@@ -697,7 +772,7 @@ export default function Laporan() {
     wsDetail.getRow(1).eachCell(cell => {
       cell.style = headerStyle;
     });
-    wsDetail.autoFilter = 'A1:I1';
+    wsDetail.autoFilter = 'A1:J1';
 
     let sumGross = 0, sumDiscount = 0, sumNet = 0, sumHpp = 0, sumProfit = 0;
 
@@ -719,6 +794,7 @@ export default function Laporan() {
         date: format(new Date(t.date), 'dd-MM-yyyy HH:mm', { locale: localeId }),
         receipt: t.receiptNumber,
         payment: pmMap[t.paymentMethodId] || 'Lainnya',
+        serviceType: t.serviceType === 'take_away' ? 'Take Away' : 'Dine In',
         gross: t.subtotal,
         discount: (t.discountAmount || 0),
         net: txNetSales,
@@ -736,12 +812,12 @@ export default function Laporan() {
       hpp: sumHpp,
       profit: sumProfit
     });
-    wsDetail.mergeCells(`A${totalRow.number}:D${totalRow.number}`);
+    wsDetail.mergeCells(`A${totalRow.number}:E${totalRow.number}`);
     totalRow.getCell('A').alignment = { horizontal: 'center', vertical: 'middle' };
     totalRow.getCell('A').font = { bold: true };
     totalRow.eachCell(cell => { 
       cell.border = cellBorder;
-      if (cell.col > 4) {
+      if (cell.col > 5) {
         cell.font = { bold: true };
       }
     });
@@ -1313,6 +1389,47 @@ export default function Laporan() {
               <Bar dataKey="sales" fill="hsl(25, 95%, 53%)" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      <Card className="border-0 shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-1.5">
+            <ShoppingCart className="w-4 h-4" />
+            Tipe Layanan
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="rounded-xl border bg-muted/20 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">Dine In</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {txCount > 0 ? ((serviceTypeBreakdown.dine_in.count / txCount) * 100).toFixed(1) : '0.0'}% dari transaksi
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-lg font-bold">{serviceTypeBreakdown.dine_in.count}</p>
+                  <p className="text-[10px] text-muted-foreground">{rp(serviceTypeBreakdown.dine_in.total)}</p>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-xl border bg-muted/20 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">Take Away</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {txCount > 0 ? ((serviceTypeBreakdown.take_away.count / txCount) * 100).toFixed(1) : '0.0'}% dari transaksi
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-lg font-bold">{serviceTypeBreakdown.take_away.count}</p>
+                  <p className="text-[10px] text-muted-foreground">{rp(serviceTypeBreakdown.take_away.total)}</p>
+                </div>
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
