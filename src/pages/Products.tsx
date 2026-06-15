@@ -110,41 +110,82 @@ export default function Produk() {
     .filter(recipe => recipe.optionId === optionId);
 
   const getDisplayStockForProduct = (product: Product) => {
-    const selectedOptionIds = getDefaultOptionIdsForProduct(
+    const groups = getProductGroups(product.id);
+    const defaultIds = getDefaultOptionIdsForProduct(
       product.id,
       productOptionGroups ?? [],
       productOptions ?? []
     );
-    const usage = new Map<number, number>();
-    const recipes = (productRecipes ?? []).filter(recipe => recipe.productId === product.id);
-    const optionRecipes = (productOptionRecipes ?? []).filter(recipe => selectedOptionIds.includes(recipe.optionId));
 
-    for (const recipe of recipes) {
-      usage.set(recipe.warehouseItemId, (usage.get(recipe.warehouseItemId) || 0) + recipe.quantity);
-    }
-    for (const recipe of optionRecipes) {
-      usage.set(recipe.warehouseItemId, (usage.get(recipe.warehouseItemId) || 0) + recipe.quantity);
-    }
+    const getAvailableForOptionIds = (selectedOptionIds: number[]) => {
+      const usage = new Map<number, number>();
+      const recipes = (productRecipes ?? []).filter(recipe => recipe.productId === product.id);
+      const optionRecipes = (productOptionRecipes ?? []).filter(recipe => selectedOptionIds.includes(recipe.optionId));
 
-    if (usage.size === 0) {
-      return product.stock;
-    }
-
-    const todayStr = new Date().toLocaleDateString('en-CA');
-    let minStock = Infinity;
-    for (const [warehouseItemId, quantity] of usage.entries()) {
-      if (quantity <= 0) continue;
-      const whItem = visibleWarehouseItems?.find(wi => wi.id === warehouseItemId);
-      if (!whItem) return 0;
-      const isResetToday = whItem.isDailyReset === 1 && whItem.lastPreparedDate !== todayStr;
-      const effectiveStock = isResetToday ? 0 : whItem.stock;
-      const available = Math.floor(effectiveStock / quantity);
-      if (available < minStock) {
-        minStock = available;
+      for (const recipe of recipes) {
+        usage.set(recipe.warehouseItemId, (usage.get(recipe.warehouseItemId) || 0) + recipe.quantity);
       }
+      for (const recipe of optionRecipes) {
+        usage.set(recipe.warehouseItemId, (usage.get(recipe.warehouseItemId) || 0) + recipe.quantity);
+      }
+
+      if (usage.size === 0) {
+        return product.stock;
+      }
+
+      const todayStr = new Date().toLocaleDateString('en-CA');
+      let minStock = Infinity;
+      for (const [warehouseItemId, quantity] of usage.entries()) {
+        if (quantity <= 0) continue;
+        const whItem = visibleWarehouseItems?.find(wi => wi.id === warehouseItemId);
+        if (!whItem) return 0;
+        const isResetToday = whItem.isDailyReset === 1 && whItem.lastPreparedDate !== todayStr;
+        const effectiveStock = isResetToday ? 0 : whItem.stock;
+        const available = Math.floor(effectiveStock / quantity);
+        if (available < minStock) {
+          minStock = available;
+        }
+      }
+
+      return minStock === Infinity ? 0 : minStock;
+    };
+
+    if (groups.length === 0) {
+      return getAvailableForOptionIds(defaultIds);
     }
 
-    return minStock === Infinity ? 0 : minStock;
+    const groupSelections = groups.map(group => {
+      const options = getGroupOptions(group.id);
+      const defaultSelection = defaultIds.filter(optionId => options.some(option => option.id === optionId));
+      const candidates = new Map<string, number[]>();
+      const push = (selection: number[]) => {
+        const normalized = [...selection].sort((a, b) => a - b);
+        candidates.set(normalized.join(':'), normalized);
+      };
+
+      push(defaultSelection);
+      if (group.required !== 1 || group.minSelect === 0) {
+        push([]);
+      }
+      options.forEach(option => push([option.id!]));
+
+      return Array.from(candidates.values());
+    });
+
+    const stockValues: number[] = [];
+    const walk = (index: number, selectedOptionIds: number[]) => {
+      if (index >= groupSelections.length) {
+        stockValues.push(getAvailableForOptionIds(selectedOptionIds));
+        return;
+      }
+
+      groupSelections[index].forEach(selection => {
+        walk(index + 1, [...selectedOptionIds, ...selection]);
+      });
+    };
+
+    walk(0, []);
+    return Math.max(0, ...stockValues);
   };
 
   const getAdminCategoryRank = (product: Product) => {

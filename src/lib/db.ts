@@ -140,6 +140,7 @@ export interface Transaction {
   openedAt?: Date;
   closedAt?: Date;
   createdBy?: number; // userId — kasir pembuat transaksi
+  cashierName?: string;
   serviceType?: 'dine_in' | 'take_away';
 }
 
@@ -957,6 +958,63 @@ export function buildStockKey(productId: number, selectedOptionIds: number[] = [
   return [productId, ...selectedOptionIds.slice().sort((a, b) => a - b)].join(':');
 }
 
+function buildOptionSelectionCandidatesForProduct(
+  productId?: number,
+  groups: ProductOptionGroup[] = [],
+  options: ProductOption[] = []
+) {
+  const productGroups = groups
+    .filter(group => group.productId === productId && group.isDeleted === 0)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  if (productGroups.length === 0) {
+    return [[]] as number[][];
+  }
+
+  const defaultSelection = getDefaultOptionSelection(productId, groups, options);
+  const groupSelections = productGroups.map(group => {
+    const groupOptions = options
+      .filter(option => option.groupId === group.id && option.isDeleted === 0)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const defaultIds = [...(defaultSelection[group.id!] ?? [])].sort((a, b) => a - b);
+    const candidates = new Map<string, number[]>();
+    const push = (selection: number[]) => {
+      const normalized = [...selection].sort((a, b) => a - b);
+      candidates.set(normalized.join(':'), normalized);
+    };
+
+    push(defaultIds);
+
+    if (group.required !== 1 || group.minSelect === 0) {
+      push([]);
+    }
+
+    if (group.maxSelect <= 1) {
+      groupOptions.forEach(option => push([option.id!]));
+    } else {
+      groupOptions.forEach(option => push([option.id!]));
+    }
+
+    return { groupId: group.id!, selections: Array.from(candidates.values()) };
+  });
+
+  const combinations: number[][] = [];
+  const walk = (index: number, selected: number[]) => {
+    if (index >= groupSelections.length) {
+      combinations.push([...selected].sort((a, b) => a - b));
+      return;
+    }
+
+    groupSelections[index].selections.forEach(selection => {
+      walk(index + 1, [...selected, ...selection]);
+    });
+  };
+
+  walk(0, []);
+
+  return Array.from(new Map(combinations.map(selection => [selection.join(':'), selection])).values());
+}
+
 export async function getProductStockUsage(productId: number, selectedOptionIds: number[] = []) {
   const usage: Record<number, number> = {};
 
@@ -995,6 +1053,25 @@ export async function getAvailableStockForSelection(productId: number, selectedO
   }
 
   return available === Infinity ? 0 : available;
+}
+
+export async function getBestAvailableStockForProduct(productId: number) {
+  const product = await db.products.get(productId);
+  if (!product) return 0;
+
+  const groups = await db.productOptionGroups.toArray();
+  const options = await db.productOptions.toArray();
+  const candidates = buildOptionSelectionCandidatesForProduct(productId, groups, options);
+
+  let maxAvailable = 0;
+  for (const candidate of candidates) {
+    const available = await getAvailableStockForSelection(productId, candidate);
+    if (available > maxAvailable) {
+      maxAvailable = available;
+    }
+  }
+
+  return maxAvailable;
 }
 
 export async function getConfiguredProductReceiptDetails(productId: number, selectedOptionIds: number[] = []) {
@@ -1168,26 +1245,58 @@ export async function repairInventoryAnomalies() {
 
   const refreshedWarehouseItems = await db.warehouseItems.where('isDeleted').equals(0).toArray();
   const visibleWarehouseItems = refreshedWarehouseItems.filter(item => item.isCashierVisible === 1);
+  const optionGroups = await db.productOptionGroups.toArray();
+  const options = await db.productOptions.toArray();
+  const optionRecipes = await db.productOptionRecipes.toArray();
 
   for (const product of products) {
     const productRecipes = recipes.filter(recipe => recipe.productId === product.id);
-    if (productRecipes.length > 0) {
-      let minStock = Infinity;
-      for (const recipe of productRecipes) {
-        const warehouseItem = refreshedWarehouseItems.find(item => item.id === recipe.warehouseItemId);
-        if (!warehouseItem) {
-          minStock = 0;
-          break;
+    const productOptionGroupsForProduct = optionGroups.filter(group => group.productId === product.id && group.isDeleted === 0);
+    const hasOptionRecipes = productOptionGroupsForProduct.some(group =>
+      options.some(option =>
+        option.groupId === group.id &&
+        option.isDeleted === 0 &&
+        optionRecipes.some(recipe => recipe.optionId === option.id)
+      )
+    );
+
+    if (productRecipes.length > 0 || hasOptionRecipes) {
+      const candidates = buildOptionSelectionCandidatesForProduct(product.id, optionGroups, options);
+      let computedStock = 0;
+
+      for (const selectedOptionIds of candidates) {
+        const usage = new Map<number, number>();
+        const selectedOptionRecipes = optionRecipes.filter(recipe => selectedOptionIds.includes(recipe.optionId));
+
+        for (const recipe of productRecipes) {
+          usage.set(recipe.warehouseItemId, (usage.get(recipe.warehouseItemId) || 0) + recipe.quantity);
         }
-        const isResetToday = warehouseItem.isDailyReset === 1 && warehouseItem.lastPreparedDate !== todayStr;
-        const effectiveStock = isResetToday ? 0 : Math.max(0, warehouseItem.stock);
-        const available = Math.floor(effectiveStock / recipe.quantity);
-        if (available < minStock) {
-          minStock = available;
+        for (const recipe of selectedOptionRecipes) {
+          usage.set(recipe.warehouseItemId, (usage.get(recipe.warehouseItemId) || 0) + recipe.quantity);
         }
+
+        let availableForCandidate = Infinity;
+        if (usage.size === 0) {
+          availableForCandidate = Math.max(0, product.stock);
+        } else {
+          for (const [warehouseItemId, quantity] of usage.entries()) {
+            const warehouseItem = refreshedWarehouseItems.find(item => item.id === warehouseItemId);
+            if (!warehouseItem) {
+              availableForCandidate = 0;
+              break;
+            }
+            const isResetToday = warehouseItem.isDailyReset === 1 && warehouseItem.lastPreparedDate !== todayStr;
+            const effectiveStock = isResetToday ? 0 : Math.max(0, warehouseItem.stock);
+            const available = Math.floor(effectiveStock / quantity);
+            if (available < availableForCandidate) {
+              availableForCandidate = available;
+            }
+          }
+        }
+
+        computedStock = Math.max(computedStock, availableForCandidate === Infinity ? 0 : Math.max(0, availableForCandidate));
       }
 
-      const computedStock = minStock === Infinity ? 0 : Math.max(0, minStock);
       if (product.stock !== computedStock) {
         await db.products.update(product.id!, {
           stock: computedStock,

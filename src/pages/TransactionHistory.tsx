@@ -59,7 +59,7 @@ export default function TransactionHistory() {
   const users = useLiveQuery(() => db.users.toArray());
 
   const userById = (uid?: number) => (uid ? users?.find((u) => u.id === uid) : undefined);
-  const cashierName = (uid?: number) => userById(uid)?.name ?? '—';
+  const resolveCashierName = (tx?: Transaction | null) => tx?.cashierName?.trim() || userById(tx?.createdBy)?.name || '—';
 
   // Auto-open detail if txId is in URL
   const txIdParam = searchParams.get('txId');
@@ -355,12 +355,12 @@ export default function TransactionHistory() {
 
                         <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
                           <span>{format(new Date(tx.date), 'HH:mm')}</span>
-                          {multiUserEnabled && (
+                          {resolveCashierName(tx) !== '—' && (
                             <>
                               <span>•</span>
                               <span className="flex items-center gap-0.5">
                                 <UserCircle2 className="w-3.5 h-3.5 text-muted-foreground/80" />
-                                {cashierName(tx.createdBy)}
+                                {resolveCashierName(tx)}
                               </span>
                             </>
                           )}
@@ -427,12 +427,12 @@ export default function TransactionHistory() {
                    <span className="text-muted-foreground">Pembayaran</span>
                    <span>{selectedTx.status === 'open' ? '-' : getPaymentName(selectedTx.paymentMethodId)}</span>
                  </div>
-                 {multiUserEnabled && (
+                 {resolveCashierName(selectedTx) !== '—' && (
                    <div className="flex justify-between text-xs">
                      <span className="text-muted-foreground">Kasir</span>
                      <span className="flex items-center gap-1">
                        <UserCircle2 className="w-3 h-3" />
-                       {cashierName(selectedTx.createdBy)}
+                        {resolveCashierName(selectedTx)}
                      </span>
                    </div>
                  )}
@@ -571,7 +571,7 @@ export default function TransactionHistory() {
           items={getTxItems(selectedTx.id)}
           storeSettings={storeSettings}
           paymentMethodName={getPaymentName(selectedTx.paymentMethodId)}
-          cashierName={selectedTx.createdBy ? cashierName(selectedTx.createdBy) : undefined}
+          cashierName={resolveCashierName(selectedTx) !== '—' ? resolveCashierName(selectedTx) : undefined}
         />
       )}
 

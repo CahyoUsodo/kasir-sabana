@@ -13,7 +13,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { 
   Warehouse, Plus, Trash2, Edit2, ChevronLeft, ArrowRight,
   Scale, X, Layers, AlertCircle, ShoppingBag,
-  Camera, Minus
+  Camera, Minus, Search
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -94,11 +94,13 @@ export default function WarehousePage() {
   // States
   const [activeTab, setActiveTab] = useState<'stok' | 'resep' | 'daily'>('stok');
   const [stockFilter, setStockFilter] = useState<'all' | 'manual' | 'cashier' | 'prep' | 'output'>('all');
+  const [stockSearch, setStockSearch] = useState('');
   
   // Item Dialog states
   const [itemDialog, setItemDialog] = useState(false);
   const [itemName, setItemName] = useState('');
   const [itemStock, setItemStock] = useState('0');
+  const [itemStockAdjustment, setItemStockAdjustment] = useState('0');
   const [itemUnit, setItemUnit] = useState('pcs');
   const [isCashierVisible, setIsCashierVisible] = useState(false);
   const [itemPrice, setItemPrice] = useState('0');
@@ -143,14 +145,16 @@ export default function WarehousePage() {
     if (!itemName.trim()) return;
     const now = new Date();
     const parsedStock = parseFloat(itemStock) || 0;
+    const parsedAdjustment = parseFloat(itemStockAdjustment) || 0;
     const parsedPrice = parseFloat(itemPrice) || 0;
     const parsedFactor = parseFloat(dailyPrepFactor) || 1;
 
     try {
       if (itemEditId) {
+        const nextStock = Math.max(0, parsedStock + parsedAdjustment);
         await db.warehouseItems.update(itemEditId, {
           name: itemName.trim(),
-          stock: parsedStock,
+          stock: nextStock,
           unit: itemUnit,
           isCashierVisible: isCashierVisible ? 1 : 0,
           price: parsedPrice,
@@ -197,6 +201,7 @@ export default function WarehousePage() {
     setItemEditId(item.id!);
     setItemName(item.name);
     setItemStock(item.stock.toString());
+    setItemStockAdjustment('0');
     setItemUnit(item.unit);
     setIsCashierVisible(item.isCashierVisible === 1);
     setItemPrice((item.price || 0).toString());
@@ -235,6 +240,7 @@ export default function WarehousePage() {
   const resetItemForm = () => {
     setItemName('');
     setItemStock('0');
+    setItemStockAdjustment('0');
     setItemUnit('pcs');
     setIsCashierVisible(false);
     setItemPrice('0');
@@ -582,6 +588,9 @@ export default function WarehousePage() {
 
   const filteredStockItems = useMemo(() => {
     return (warehouseItems ?? []).filter(item => {
+      const normalizedSearch = stockSearch.trim().toLowerCase();
+      const matchesSearch = !normalizedSearch || item.name.toLowerCase().includes(normalizedSearch);
+      if (!matchesSearch) return false;
       const meta = getItemMeta(item);
       if (stockFilter === 'manual') return meta.isManual;
       if (stockFilter === 'cashier') return meta.isCashierItem;
@@ -589,7 +598,7 @@ export default function WarehousePage() {
       if (stockFilter === 'output') return meta.isOutput;
       return true;
     }).sort(compareWarehouseItems);
-  }, [warehouseItems, stockFilter, getItemMeta, compareWarehouseItems]);
+  }, [warehouseItems, stockFilter, stockSearch, getItemMeta, compareWarehouseItems]);
 
   const sortedRecipeProducts = useMemo(() => {
     return (cashierProducts ?? [])
@@ -693,6 +702,15 @@ export default function WarehousePage() {
             <p className="text-[11px] text-muted-foreground leading-relaxed">
               Item hasil persiapan tetap ditampilkan agar stok siap jual terlihat, tetapi dibedakan dari bahan manual biasa supaya tidak membingungkan.
             </p>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                value={stockSearch}
+                onChange={e => setStockSearch(e.target.value)}
+                placeholder="Cari bahan gudang..."
+                className="pl-9 h-10"
+              />
+            </div>
             <div className="flex flex-wrap gap-2">
               {stockFilterOptions.map(option => (
                 <Button
@@ -1054,16 +1072,52 @@ export default function WarehousePage() {
               <Input value={itemName} onChange={e => setItemName(e.target.value)} placeholder="Contoh: Plastik Kecil, Dada Ayam" className="h-11" />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Stok</Label>
-                <Input type="number" value={itemStock} onChange={e => setItemStock(e.target.value)} className="h-11" />
+            {itemEditId ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label>Stok Saat Ini</Label>
+                  <Input type="number" value={itemStock} readOnly className="h-11 bg-muted/40" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Tambah Stok</Label>
+                  <Input
+                    type="number"
+                    value={itemStockAdjustment}
+                    onChange={e => setItemStockAdjustment(e.target.value)}
+                    className="h-11"
+                    placeholder="Contoh: 100"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Stok Setelah Disimpan</Label>
+                  <Input
+                    type="number"
+                    value={String(Math.max(0, (parseFloat(itemStock) || 0) + (parseFloat(itemStockAdjustment) || 0)))}
+                    readOnly
+                    className="h-11 bg-muted/40"
+                  />
+                </div>
               </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Stok Awal</Label>
+                  <Input type="number" value={itemStock} onChange={e => setItemStock(e.target.value)} className="h-11" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Satuan</Label>
+                  <Input value={itemUnit} onChange={e => setItemUnit(e.target.value)} placeholder="pcs, gram, dll" className="h-11" />
+                </div>
+              </div>
+            )}
+
+            {itemEditId && (
               <div className="space-y-1.5">
                 <Label>Satuan</Label>
                 <Input value={itemUnit} onChange={e => setItemUnit(e.target.value)} placeholder="pcs, gram, dll" className="h-11" />
+                <p className="text-[10px] text-muted-foreground">Masukkan jumlah barang yang datang. Sistem akan menambahkan ke stok lama secara otomatis.</p>
               </div>
-            </div>
+            )}
 
             <div className="flex items-center justify-between p-3 bg-muted/30 rounded-xl">
               <div className="space-y-0.5">

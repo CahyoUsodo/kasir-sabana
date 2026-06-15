@@ -35,9 +35,6 @@ export default function Dashboard() {
 
   const lowStockProducts = useLiveQuery(async () => {
     const products = await db.products.where('isDeleted').equals(0).toArray();
-    const productRecipes = await db.productRecipes.toArray();
-    const visibleWarehouseItems = await db.warehouseItems.where('isDeleted').equals(0).toArray();
-    const todayStr = new Date().toLocaleDateString('en-CA');
     const normalizedName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
     const merged = new Map<string, { id: string; name: string; stock: number; unit: string; priority: number }>();
@@ -50,42 +47,17 @@ export default function Dashboard() {
     };
 
     for (const p of products) {
-      const recipes = productRecipes.filter(r => r.productId === p.id);
-      if (recipes.length > 0) {
-        let minStock = Infinity;
-        for (const recipe of recipes) {
-          const whItem = visibleWarehouseItems.find(wi => wi.id === recipe.warehouseItemId);
-          if (whItem) {
-            const isResetToday = whItem.isDailyReset === 1 && whItem.lastPreparedDate !== todayStr;
-            const effectiveStock = isResetToday ? 0 : whItem.stock;
-            const available = Math.floor(effectiveStock / recipe.quantity);
-            if (available < minStock) {
-              minStock = available;
-            }
-          } else {
-            minStock = 0;
-          }
-        }
-        upsert({
-          id: `product-${p.id}`,
-          name: p.name,
-          stock: minStock === Infinity ? 0 : minStock,
-          unit: p.unit,
-          priority: 3,
-        });
-        continue;
-      }
       upsert({
         id: `product-${p.id}`,
         name: p.name,
         stock: p.stock,
         unit: p.unit,
-        priority: 1,
+        priority: 3,
       });
     }
 
     return Array.from(merged.values())
-      .filter(item => item.stock <= 5)
+      .filter(item => item.stock > 0 && item.stock <= 5)
       .sort((a, b) => a.stock - b.stock || a.name.localeCompare(b.name, 'id'));
   }, []);
 
@@ -281,7 +253,7 @@ export default function Dashboard() {
                   <CardContent className="p-3 flex items-center justify-between gap-3">
                     <span className="text-sm font-medium">{product.name}</span>
                     <span className="text-xs font-bold text-destructive bg-destructive/10 px-2 py-1 rounded-full shrink-0">
-                      {product.stock <= 0 ? `Habis` : `Sisa ${product.stock} ${product.unit}`}
+                      {`Sisa ${product.stock} ${product.unit}`}
                     </span>
                   </CardContent>
                 </Card>

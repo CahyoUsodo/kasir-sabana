@@ -63,6 +63,7 @@ export default function Kasir() {
   const [lastTransaction, setLastTransaction] = useState<Transaction | null>(null);
   const [lastTxItems, setLastTxItems] = useState<TransactionItemRecord[]>([]);
   const [customerName, setCustomerName] = useState('');
+  const [cashierNameInput, setCashierNameInput] = useState(currentUser?.name ?? '');
   const [tableNumber, setTableNumber] = useState('');
   const [remarks, setRemarks] = useState('');
 
@@ -285,7 +286,47 @@ export default function Kasir() {
   };
 
   const getDisplayStockForProduct = (product: Product) => {
-    return getAvailableStockForSelectionSync(product, getDefaultSelectionForProduct(product));
+    const groups = getProductGroups(product.id);
+    const defaultSelection = getDefaultSelectionForProduct(product);
+
+    if (groups.length === 0) {
+      return getAvailableStockForSelectionSync(product, defaultSelection);
+    }
+
+    const groupSelections = groups.map(group => {
+      const candidates = new Map<string, number[]>();
+      const push = (selection: number[]) => {
+        const normalized = [...selection].sort((a, b) => a - b);
+        candidates.set(normalized.join(':'), normalized);
+      };
+
+      push(defaultSelection[group.id!] ?? []);
+      if (group.required !== 1 || group.minSelect === 0) {
+        push([]);
+      }
+      getGroupOptions(group.id).forEach(option => push([option.id!]));
+
+      return { groupId: group.id!, selections: Array.from(candidates.values()) };
+    });
+
+    const availability: number[] = [];
+    const walk = (index: number, selection: Record<number, number[]>) => {
+      if (index >= groupSelections.length) {
+        availability.push(getAvailableStockForSelectionSync(product, selection));
+        return;
+      }
+
+      const group = groupSelections[index];
+      group.selections.forEach(optionIds => {
+        walk(index + 1, {
+          ...selection,
+          [group.groupId]: optionIds,
+        });
+      });
+    };
+
+    walk(0, {});
+    return Math.max(0, ...availability);
   };
 
   const getSelectionWithOption = (groupId: number, optionId: number, maxSelect: number) => {
@@ -453,6 +494,7 @@ export default function Kasir() {
       setTxDiscountType(tx.discountType);
       setTxDiscountValue(tx.discountType ? String(tx.discountValue) : '');
       setCustomerName(tx.customerName || '');
+      setCashierNameInput(tx.cashierName || currentUser?.name || '');
       setTableNumber(tx.tableNumber || '');
       setRemarks(tx.remarks || '');
       setServiceType(tx.serviceType || 'dine_in');
@@ -501,13 +543,19 @@ export default function Kasir() {
       setPaymentMethodId(draft.paymentMethodId ?? '');
       setPaymentAmount(draft.paymentAmount ?? '');
       setCustomerName(draft.customerName ?? '');
+      setCashierNameInput(draft.cashierNameInput ?? currentUser?.name ?? '');
       setTableNumber(draft.tableNumber ?? '');
       setRemarks(draft.remarks ?? '');
     } catch (error) {
       console.error('Failed to restore cashier draft', error);
       window.localStorage.removeItem(CASHIER_DRAFT_KEY);
     }
-  }, [editTxIdParam]);
+  }, [editTxIdParam, currentUser?.name]);
+
+  useEffect(() => {
+    if (editingTxId !== null) return;
+    setCashierNameInput(prev => prev || currentUser?.name || '');
+  }, [currentUser?.name, editingTxId]);
 
   const todayStr = new Date().toLocaleDateString('en-CA');
   const activeDailyPrepFormulas = getActiveDailyPrepFormulas(dailyPrepFormulas ?? [], visibleWarehouseItems ?? []);
@@ -668,11 +716,13 @@ export default function Kasir() {
 
   useEffect(() => {
     if (!draftRestoredRef.current && !editTxIdParam) return;
+    const defaultCashierName = currentUser?.name?.trim() ?? '';
 
     const shouldClearDraft =
       cart.length === 0 &&
       editingTxId === null &&
       !customerName.trim() &&
+      (!cashierNameInput.trim() || cashierNameInput.trim() === defaultCashierName) &&
       !tableNumber.trim() &&
       !remarks.trim() &&
       !txDiscountValue &&
@@ -696,6 +746,7 @@ export default function Kasir() {
       paymentMethodId,
       paymentAmount,
       customerName,
+      cashierNameInput,
       tableNumber,
       remarks,
     }));
@@ -711,8 +762,10 @@ export default function Kasir() {
     paymentMethodId,
     paymentAmount,
     customerName,
+    cashierNameInput,
     tableNumber,
     remarks,
+    currentUser?.name,
   ]);
 
   const doFullReset = () => {
@@ -727,6 +780,7 @@ export default function Kasir() {
     setPaymentMethodId('');
     setPaymentAmount('');
     setCustomerName('');
+    setCashierNameInput(currentUser?.name ?? '');
     setTableNumber('');
     setRemarks('');
     setIsQuickAdding(false);
@@ -924,6 +978,11 @@ export default function Kasir() {
 
   const handleCheckout = async () => {
     if (!paymentMethodId || paidAmount < total) return;
+    const finalCashierName = cashierNameInput.trim() || currentUser?.name?.trim() || '';
+    if (!finalCashierName) {
+      toast.error('Nama kasir wajib diisi');
+      return;
+    }
 
     if (editingTxId) {
       // Update existing open bill → paid
@@ -943,6 +1002,7 @@ export default function Kasir() {
         customerName: customerName.trim() || undefined,
         tableNumber: serviceType === 'take_away' ? undefined : (tableNumber.trim() || undefined),
         remarks: remarks.trim() || undefined,
+        cashierName: finalCashierName,
         closedAt: new Date(),
         serviceType,
       });
@@ -1019,6 +1079,7 @@ export default function Kasir() {
         tableNumber: serviceType === 'take_away' ? undefined : (tableNumber.trim() || undefined),
         remarks: remarks.trim() || undefined,
         createdBy: currentUser?.id,
+        cashierName: finalCashierName,
         serviceType,
       };
 
@@ -1818,6 +1879,16 @@ export default function Kasir() {
                 </button>
               </div>
 
+              <div className="relative">
+                <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                <Input
+                  placeholder="Nama kasir"
+                  value={cashierNameInput}
+                  onChange={e => setCashierNameInput(e.target.value)}
+                  className="pl-8 h-10 text-sm"
+                />
+              </div>
+
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -2016,16 +2087,16 @@ export default function Kasir() {
 
       {/* Receipt Dialog */}
       {lastTransaction && (
-        <Receipt
-          open={receiptOpen}
-          onClose={() => setReceiptOpen(false)}
-          transaction={lastTransaction}
-          items={lastTxItems}
-          storeSettings={storeSettings}
-          paymentMethodName={paymentMethods?.find(pm => pm.id === lastTransaction.paymentMethodId)?.name || 'Tunai'}
-          cashierName={lastTransaction.createdBy ? allUsers?.find(u => u.id === lastTransaction.createdBy)?.name : undefined}
-        />
-      )}
+      <Receipt
+        open={receiptOpen}
+        onClose={() => setReceiptOpen(false)}
+        transaction={lastTransaction}
+        items={lastTxItems}
+        storeSettings={storeSettings}
+        paymentMethodName={paymentMethods?.find(pm => pm.id === lastTransaction.paymentMethodId)?.name || 'Tunai'}
+        cashierName={lastTransaction.cashierName || (lastTransaction.createdBy ? allUsers?.find(u => u.id === lastTransaction.createdBy)?.name : undefined)}
+      />
+    )}
 
 
       {/* Daily Prep Dialog */}
