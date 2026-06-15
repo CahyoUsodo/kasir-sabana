@@ -777,8 +777,8 @@ export default function Pengaturan() {
       {/* Transaksi & Stok */}
       <div className="space-y-2">
         <h2 className="text-sm font-semibold text-muted-foreground">Transaksi & Stok</h2>
-        <Link to="/history">
-          <Card className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow mb-2">
+        <Link to="/history" className="block">
+          <Card className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
             <CardContent className="p-3 flex items-center gap-3">
               <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><Receipt className="w-4 h-4" /></div>
               <div className="flex-1"><p className="text-sm font-semibold">Riwayat Transaksi</p><p className="text-[10px] text-muted-foreground">Lihat semua transaksi & cetak ulang struk</p></div>
@@ -787,7 +787,7 @@ export default function Pengaturan() {
           </Card>
         </Link>
         {/* Supplier removed per user request */}
-        <Link to="/warehouse">
+        <Link to="/warehouse" className="block">
           <Card className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
             <CardContent className="p-3 flex items-center gap-3">
               <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><Warehouse className="w-4 h-4" /></div>
@@ -796,7 +796,7 @@ export default function Pengaturan() {
             </CardContent>
           </Card>
         </Link>
-        <Link to="/daily-expenses">
+        <Link to="/daily-expenses" className="block">
           <Card className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
             <CardContent className="p-3 flex items-center gap-3">
               <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><DollarSign className="w-4 h-4" /></div>

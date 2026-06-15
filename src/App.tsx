@@ -3,7 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, type ComponentType } from "react";
 import { checkVersion } from "@/lib/version-check";
 import { AuthProvider } from "@/hooks/use-auth";
 import AppLayout from "./components/layout/AppLayout";
@@ -13,6 +13,38 @@ const queryClient = new QueryClient();
 import { useAutoBackup } from "@/hooks/useAutoBackup";
 
 import { db, repairInventoryAnomalies } from '@/lib/db';
+
+const lazyWithChunkRecovery = <T extends ComponentType<any>>(
+  importer: () => Promise<{ default: T }>,
+  cacheKey: string
+) =>
+  lazy(async () => {
+    const retryKey = `lazy-retry:${cacheKey}`;
+
+    try {
+      const module = await importer();
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem(retryKey);
+      }
+      return module;
+    } catch (error) {
+      if (typeof window !== "undefined") {
+        const message = error instanceof Error ? error.message : String(error);
+        const alreadyRetried = window.sessionStorage.getItem(retryKey) === "1";
+        const isChunkLoadError = /Failed to fetch dynamically imported module|Importing a module script failed|Loading chunk|ChunkLoadError/i.test(message);
+
+        if (isChunkLoadError && !alreadyRetried) {
+          window.sessionStorage.setItem(retryKey, "1");
+          window.location.reload();
+          return new Promise<never>(() => {});
+        }
+
+        window.sessionStorage.removeItem(retryKey);
+      }
+
+      throw error;
+    }
+  });
 
 const loadDashboard = () => import("./pages/Dashboard");
 const loadCashier = () => import("./pages/Cashier");
@@ -29,20 +61,20 @@ const loadWarehousePage = () => import("./pages/Warehouse");
 const loadDailyExpensesPage = () => import("./pages/DailyExpenses");
 const loadNotFound = () => import("./pages/NotFound");
 
-const Dashboard = lazy(loadDashboard);
-const Cashier = lazy(loadCashier);
-const Products = lazy(loadProducts);
-const Reports = lazy(loadReports);
-const Settings = lazy(loadSettings);
-const SupplierPage = lazy(loadSupplierPage);
-const StockInPage = lazy(loadStockInPage);
-const StockOutPage = lazy(loadStockOutPage);
-const TransactionHistory = lazy(loadTransactionHistory);
-const StockReport = lazy(loadStockReport);
-const UsersPage = lazy(loadUsersPage);
-const WarehousePage = lazy(loadWarehousePage);
-const DailyExpensesPage = lazy(loadDailyExpensesPage);
-const NotFound = lazy(loadNotFound);
+const Dashboard = lazyWithChunkRecovery(loadDashboard, "dashboard");
+const Cashier = lazyWithChunkRecovery(loadCashier, "cashier");
+const Products = lazyWithChunkRecovery(loadProducts, "products");
+const Reports = lazyWithChunkRecovery(loadReports, "reports");
+const Settings = lazyWithChunkRecovery(loadSettings, "settings");
+const SupplierPage = lazyWithChunkRecovery(loadSupplierPage, "supplier");
+const StockInPage = lazyWithChunkRecovery(loadStockInPage, "stock-in");
+const StockOutPage = lazyWithChunkRecovery(loadStockOutPage, "stock-out");
+const TransactionHistory = lazyWithChunkRecovery(loadTransactionHistory, "history");
+const StockReport = lazyWithChunkRecovery(loadStockReport, "stock-report");
+const UsersPage = lazyWithChunkRecovery(loadUsersPage, "users");
+const WarehousePage = lazyWithChunkRecovery(loadWarehousePage, "warehouse");
+const DailyExpensesPage = lazyWithChunkRecovery(loadDailyExpensesPage, "daily-expenses");
+const NotFound = lazyWithChunkRecovery(loadNotFound, "not-found");
 
 const App = () => {
   useAutoBackup();

@@ -225,13 +225,17 @@ export default function Laporan() {
     if (
       normalized === 'ayam potong 9' ||
       normalized === 'daging chicken strip' ||
-      normalized === 'beras 10 liter'
+      normalized === 'beras 10 liter' ||
+      normalized === 'beras mentik wangi 10 kg' ||
+      normalized.includes('sunco minyak goreng') ||
+      normalized.includes('tepung fried chicken')
     ) return 'Bahan Produksi';
 
     if (
       normalized.includes('plastik') ||
       normalized.includes('box') ||
-      normalized.includes('kemasan')
+      normalized.includes('kemasan') ||
+      normalized.includes('paper bowl')
     ) return 'Kemasan';
 
     if (
@@ -252,14 +256,20 @@ export default function Laporan() {
       normalized.includes('matcha') ||
       normalized.includes('green tea') ||
       normalized.includes('cokelat') ||
-      normalized.includes('thai tea')
+      normalized.includes('thai tea') ||
+      normalized.includes('ice cream') ||
+      normalized.includes('coca cola') ||
+      normalized.includes('fanta') ||
+      normalized.includes('sprite')
     ) return 'Minuman';
 
     if (
       normalized.includes('kentang') ||
       normalized.includes('chicken strip') ||
       normalized.includes('chicken roll') ||
+      normalized.includes('chicken patty') ||
       normalized.includes('kulit') ||
+      normalized === 'katsu' ||
       normalized.includes('bakso') ||
       normalized.includes('burger') ||
       normalized.includes('bun')
