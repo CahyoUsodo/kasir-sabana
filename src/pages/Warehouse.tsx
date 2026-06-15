@@ -34,6 +34,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { compressImage } from '@/lib/image-utils';
+import { cn } from '@/lib/utils';
 
 interface FormulaFactorInputProps {
   initialFactor: number;
