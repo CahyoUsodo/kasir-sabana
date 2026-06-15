@@ -1076,7 +1076,12 @@ export default function WarehousePage() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="space-y-1.5">
                   <Label>Stok Saat Ini</Label>
-                  <Input type="number" value={itemStock} readOnly className="h-11 bg-muted/40" />
+                  <Input
+                    type="number"
+                    value={itemStock}
+                    onChange={e => setItemStock(e.target.value)}
+                    className="h-11"
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Tambah Stok</Label>
@@ -1115,7 +1120,9 @@ export default function WarehousePage() {
               <div className="space-y-1.5">
                 <Label>Satuan</Label>
                 <Input value={itemUnit} onChange={e => setItemUnit(e.target.value)} placeholder="pcs, gram, dll" className="h-11" />
-                <p className="text-[10px] text-muted-foreground">Masukkan jumlah barang yang datang. Sistem akan menambahkan ke stok lama secara otomatis.</p>
+                <p className="text-[10px] text-muted-foreground">
+                  `Stok Saat Ini` bisa dikoreksi langsung. Jika ada barang datang, isi juga `Tambah Stok` agar stok akhir dihitung otomatis.
+                </p>
               </div>
             )}
 
