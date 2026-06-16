@@ -93,8 +93,6 @@ export default function Laporan() {
 
   const allItems = txItems ?? [];
 
-  const totalSales = transactions?.reduce((s, t) => s + t.total, 0) ?? 0;
-  const totalProfit = transactions?.reduce((s, t) => s + t.profit, 0) ?? 0;
   const txCount = transactions?.length ?? 0;
 
   // P&L breakdown
@@ -179,64 +177,6 @@ export default function Laporan() {
   })();
 
   const hasOtherPaymentMethods = paymentSummary.other.txCount > 0 || Math.abs(paymentSummary.other.net) > 0;
-  const overviewCards = [
-    {
-      label: 'Transaksi',
-      value: txCount.toLocaleString('id-ID'),
-      caption: `${txCount.toLocaleString('id-ID')} transaksi`,
-      icon: ShoppingCart,
-      valueClassName: 'text-foreground',
-      iconClassName: 'text-primary',
-    },
-    {
-      label: 'Cash',
-      value: rp(paymentSummary.cash.net),
-      caption: `${paymentSummary.cash.txCount.toLocaleString('id-ID')} transaksi`,
-      icon: DollarSign,
-      valueClassName: 'text-foreground',
-      iconClassName: 'text-success',
-    },
-    {
-      label: 'QRIS',
-      value: rp(paymentSummary.qris.net),
-      caption: `${paymentSummary.qris.txCount.toLocaleString('id-ID')} transaksi`,
-      icon: BarChart3,
-      valueClassName: 'text-foreground',
-      iconClassName: 'text-cyan-500',
-    },
-    {
-      label: 'Total',
-      value: rp(paymentSummary.total.net),
-      caption: 'Total penjualan bersih',
-      icon: TrendingUp,
-      valueClassName: 'text-foreground',
-      iconClassName: 'text-primary',
-    },
-    {
-      label: 'Laba Kotor',
-      value: rp(grossProfit),
-      caption: 'Sebelum pengeluaran',
-      icon: ArrowUp,
-      valueClassName: grossProfit >= 0 ? 'text-success' : 'text-destructive',
-      iconClassName: grossProfit >= 0 ? 'text-success' : 'text-destructive',
-    },
-    {
-      label: 'Pengeluaran',
-      value: rp(totalOperationalExpenses),
-      caption: 'Operasional tercatat',
-      icon: ArrowDown,
-      valueClassName: totalOperationalExpenses > 0 ? 'text-destructive' : 'text-foreground',
-      iconClassName: totalOperationalExpenses > 0 ? 'text-destructive' : 'text-muted-foreground',
-    },
-    {
-      label: 'Laba Bersih',
-      value: rp(netProfitAfterExpenses),
-      caption: 'Setelah pengeluaran',
-      icon: DollarSign,
-      valueClassName: netProfitAfterExpenses >= 0 ? 'text-success' : 'text-destructive',
-      iconClassName: netProfitAfterExpenses >= 0 ? 'text-success' : 'text-destructive',
-    },
-  ] as const;
   const summaryTableRows = [
     {
       label: 'Transaksi',
@@ -293,6 +233,13 @@ export default function Laporan() {
       qris: '-',
       total: rp(netProfitAfterExpenses),
       tone: 'successStrong',
+    },
+    {
+      label: 'Margin',
+      cash: '-',
+      qris: '-',
+      total: `${marginPercent.toFixed(1)}%`,
+      tone: 'neutral',
     },
   ] as const;
 
@@ -1434,32 +1381,6 @@ export default function Laporan() {
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
-        {overviewCards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <Card key={card.label} className="border-0 shadow-sm">
-              <CardContent className="flex items-start justify-between gap-3 p-4">
-                <div className="min-w-0">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    {card.label}
-                  </p>
-                  <p className={cn('mt-2 text-2xl font-bold leading-none', card.valueClassName)}>
-                    {card.value}
-                  </p>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {card.caption}
-                  </p>
-                </div>
-                <div className="rounded-full bg-muted/60 p-2.5">
-                  <Icon className={cn('h-4 w-4', card.iconClassName)} />
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-
       {/* Summary */}
       <Card className="border-0 shadow-sm overflow-hidden">
         <CardHeader className="pb-3">
@@ -1508,7 +1429,7 @@ export default function Laporan() {
                       className={cn(
                         'border-b border-r border-border px-4 py-3',
                         rowWeightClass,
-                        row.label === 'Laba Bersih' && 'bg-success/5',
+                        (row.label === 'Laba Bersih' || row.label === 'Margin') && 'bg-success/5',
                       )}
                     >
                       {row.label}
@@ -1524,7 +1445,7 @@ export default function Laporan() {
                         'border-b border-border px-4 py-3 text-right tabular-nums',
                         rowToneClass,
                         rowWeightClass,
-                        row.label === 'Laba Bersih' && 'bg-success/5',
+                        (row.label === 'Laba Bersih' || row.label === 'Margin') && 'bg-success/5',
                       )}
                     >
                       {row.total}
@@ -1533,70 +1454,6 @@ export default function Laporan() {
                 );
               })}
             </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Profit & Loss */}
-      <Card className="border-0 shadow-sm">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-1.5">
-            <DollarSign className="w-4 h-4" />
-            Laba Rugi
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <div className="flex justify-between items-center text-sm">
-            <div className="flex items-center gap-2">
-              <ArrowUp className="w-3.5 h-3.5 text-success" />
-              <span>Pendapatan Kotor</span>
-            </div>
-            <span className="font-semibold">{rp(totalRevenue)}</span>
-          </div>
-          {totalDiscount > 0 && (
-            <div className="flex justify-between items-center text-sm text-destructive">
-              <div className="flex items-center gap-2">
-                <Minus className="w-3.5 h-3.5" />
-                <span>Diskon</span>
-              </div>
-              <span className="font-semibold">-{rp(totalDiscount)}</span>
-            </div>
-          )}
-          <div className="flex justify-between items-center text-sm border-t pt-2">
-            <span className="font-medium">Penjualan Bersih</span>
-            <span className="font-bold">{rp(netSales)}</span>
-          </div>
-          <div className="flex justify-between items-center text-sm text-destructive">
-            <div className="flex items-center gap-2">
-              <ArrowDown className="w-3.5 h-3.5" />
-              <span>HPP (Modal)</span>
-            </div>
-            <span className="font-semibold">-{rp(totalHpp)}</span>
-          </div>
-          <div className="flex justify-between items-center text-base border-t pt-2">
-            <span className="font-bold">Laba Kotor</span>
-            <span className={`font-bold ${grossProfit >= 0 ? 'text-success' : 'text-destructive'}`}>
-              {rp(grossProfit)}
-            </span>
-          </div>
-          {totalOperationalExpenses > 0 && (
-            <div className="flex justify-between items-center text-sm text-destructive">
-              <div className="flex items-center gap-2">
-                <Minus className="w-3.5 h-3.5" />
-                <span>Pengeluaran Operasional</span>
-              </div>
-              <span className="font-semibold">-{rp(totalOperationalExpenses)}</span>
-            </div>
-          )}
-          <div className="flex justify-between items-center text-base border-t pt-2">
-            <span className="font-bold">Laba Bersih</span>
-            <span className={`font-bold ${netProfitAfterExpenses >= 0 ? 'text-success' : 'text-destructive'}`}>
-              {rp(netProfitAfterExpenses)}
-            </span>
-          </div>
-          <div className="flex justify-between items-center text-xs text-muted-foreground">
-            <span>Margin</span>
-            <span className="font-semibold">{marginPercent.toFixed(1)}%</span>
           </div>
         </CardContent>
       </Card>
