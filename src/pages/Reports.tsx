@@ -17,6 +17,10 @@ import { useAuth } from '@/hooks/use-auth';
 import LockedPage from '@/components/LockedPage';
 
 export default function Laporan() {
+  function rp(n: number) {
+    return `Rp ${n.toLocaleString('id-ID')}`;
+  }
+
   const { can } = useAuth();
   const [period, setPeriod] = useState<'7' | '30' | 'custom'>('7');
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
@@ -377,8 +381,6 @@ export default function Laporan() {
   const topProducts = [...productSales]
     .sort((a, b) => (b.qty - a.qty) || (b.netRevenue - a.netRevenue))
     .slice(0, 5);
-
-  const rp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
 
   const getStockCategory = (name: string) => {
     const normalized = name.toLowerCase();
