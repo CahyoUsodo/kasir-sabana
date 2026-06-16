@@ -1,4 +1,4 @@
-import { useLiveQuery } from 'dexie-react-hooks';
+﻿import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type TransactionItemRecord } from '@/lib/db';
 import { useState } from 'react';
 import { BarChart3, TrendingUp, ShoppingCart, Package, DollarSign, ArrowDown, ArrowUp, Minus, Download, PackageMinus } from 'lucide-react';
@@ -49,6 +49,7 @@ export default function Laporan() {
   const warehouseItems = useLiveQuery(() => db.warehouseItems.where('isDeleted').equals(0).toArray());
   const productRecipes = useLiveQuery(() => db.productRecipes.toArray());
   const productOptionRecipes = useLiveQuery(() => db.productOptionRecipes.toArray());
+  const paymentMethods = useLiveQuery(() => db.paymentMethods.toArray());
   const dailyPrepFormulas = useLiveQuery(() => db.dailyPrepFormulas.toArray());
   const dailyExpenses = useLiveQuery(async () => {
     if (period === 'custom') {
@@ -131,6 +132,165 @@ export default function Laporan() {
     if (!info || info.extraDiscount <= 0 || info.itemSubtotalSum <= 0) return 0;
     return (item.subtotal / info.itemSubtotalSum) * info.extraDiscount;
   };
+
+  const paymentMethodById = new Map((paymentMethods ?? []).filter(pm => pm.id).map(pm => [pm.id!, pm]));
+  const getPaymentBucket = (paymentMethodId: number): 'cash' | 'qris' | 'other' => {
+    const method = paymentMethodById.get(paymentMethodId);
+    const normalized = `${method?.name ?? ''} ${method?.category ?? ''}`.toLowerCase();
+    if (normalized.includes('qris')) return 'qris';
+    if (normalized.includes('tunai') || normalized.includes('cash')) return 'cash';
+    return 'other';
+  };
+
+  const paymentSummary = (() => {
+    const base = {
+      cash: { txCount: 0, gross: 0, discount: 0, net: 0, hpp: 0, grossProfit: 0 },
+      qris: { txCount: 0, gross: 0, discount: 0, net: 0, hpp: 0, grossProfit: 0 },
+      other: { txCount: 0, gross: 0, discount: 0, net: 0, hpp: 0, grossProfit: 0 },
+      total: { txCount, gross: totalRevenue, discount: totalDiscount, net: netSales, hpp: totalHpp, grossProfit },
+    };
+
+    const txById = new Map((transactions ?? []).filter(tx => tx.id).map(tx => [tx.id!, tx]));
+
+    (transactions ?? []).forEach(tx => {
+      const bucket = getPaymentBucket(tx.paymentMethodId);
+      base[bucket].txCount += 1;
+      base[bucket].gross += tx.subtotal;
+      base[bucket].discount += tx.discountAmount || 0;
+      base[bucket].net += tx.total;
+    });
+
+    allItems.forEach(item => {
+      const tx = txById.get(item.transactionId);
+      if (!tx) return;
+      const bucket = getPaymentBucket(tx.paymentMethodId);
+      base[bucket].hpp += item.hpp * item.quantity;
+    });
+
+    (['cash', 'qris', 'other'] as const).forEach(bucket => {
+      base[bucket].grossProfit = base[bucket].net - base[bucket].hpp;
+    });
+
+    return base;
+  })();
+
+  const hasOtherPaymentMethods = paymentSummary.other.txCount > 0 || Math.abs(paymentSummary.other.net) > 0;
+  const overviewCards = [
+    {
+      label: 'Transaksi',
+      value: txCount.toLocaleString('id-ID'),
+      caption: `${txCount.toLocaleString('id-ID')} transaksi`,
+      icon: ShoppingCart,
+      valueClassName: 'text-foreground',
+      iconClassName: 'text-primary',
+    },
+    {
+      label: 'Cash',
+      value: rp(paymentSummary.cash.net),
+      caption: `${paymentSummary.cash.txCount.toLocaleString('id-ID')} transaksi`,
+      icon: DollarSign,
+      valueClassName: 'text-foreground',
+      iconClassName: 'text-success',
+    },
+    {
+      label: 'QRIS',
+      value: rp(paymentSummary.qris.net),
+      caption: `${paymentSummary.qris.txCount.toLocaleString('id-ID')} transaksi`,
+      icon: BarChart3,
+      valueClassName: 'text-foreground',
+      iconClassName: 'text-cyan-500',
+    },
+    {
+      label: 'Total',
+      value: rp(paymentSummary.total.net),
+      caption: 'Total penjualan bersih',
+      icon: TrendingUp,
+      valueClassName: 'text-foreground',
+      iconClassName: 'text-primary',
+    },
+    {
+      label: 'Laba Kotor',
+      value: rp(grossProfit),
+      caption: 'Sebelum pengeluaran',
+      icon: ArrowUp,
+      valueClassName: grossProfit >= 0 ? 'text-success' : 'text-destructive',
+      iconClassName: grossProfit >= 0 ? 'text-success' : 'text-destructive',
+    },
+    {
+      label: 'Pengeluaran',
+      value: rp(totalOperationalExpenses),
+      caption: 'Operasional tercatat',
+      icon: ArrowDown,
+      valueClassName: totalOperationalExpenses > 0 ? 'text-destructive' : 'text-foreground',
+      iconClassName: totalOperationalExpenses > 0 ? 'text-destructive' : 'text-muted-foreground',
+    },
+    {
+      label: 'Laba Bersih',
+      value: rp(netProfitAfterExpenses),
+      caption: 'Setelah pengeluaran',
+      icon: DollarSign,
+      valueClassName: netProfitAfterExpenses >= 0 ? 'text-success' : 'text-destructive',
+      iconClassName: netProfitAfterExpenses >= 0 ? 'text-success' : 'text-destructive',
+    },
+  ] as const;
+  const summaryTableRows = [
+    {
+      label: 'Transaksi',
+      cash: paymentSummary.cash.txCount.toLocaleString('id-ID'),
+      qris: paymentSummary.qris.txCount.toLocaleString('id-ID'),
+      total: paymentSummary.total.txCount.toLocaleString('id-ID'),
+      tone: 'neutral',
+    },
+    {
+      label: 'Pendapatan Kotor',
+      cash: rp(paymentSummary.cash.gross),
+      qris: rp(paymentSummary.qris.gross),
+      total: rp(paymentSummary.total.gross),
+      tone: 'default',
+    },
+    {
+      label: 'Diskon',
+      cash: paymentSummary.cash.discount > 0 ? `-${rp(paymentSummary.cash.discount)}` : 'Rp 0',
+      qris: paymentSummary.qris.discount > 0 ? `-${rp(paymentSummary.qris.discount)}` : 'Rp 0',
+      total: paymentSummary.total.discount > 0 ? `-${rp(paymentSummary.total.discount)}` : 'Rp 0',
+      tone: 'danger',
+    },
+    {
+      label: 'Penjualan Bersih',
+      cash: rp(paymentSummary.cash.net),
+      qris: rp(paymentSummary.qris.net),
+      total: rp(paymentSummary.total.net),
+      tone: 'defaultStrong',
+    },
+    {
+      label: 'HPP (Modal)',
+      cash: paymentSummary.cash.hpp > 0 ? `-${rp(paymentSummary.cash.hpp)}` : 'Rp 0',
+      qris: paymentSummary.qris.hpp > 0 ? `-${rp(paymentSummary.qris.hpp)}` : 'Rp 0',
+      total: paymentSummary.total.hpp > 0 ? `-${rp(paymentSummary.total.hpp)}` : 'Rp 0',
+      tone: 'danger',
+    },
+    {
+      label: 'Laba Kotor',
+      cash: rp(paymentSummary.cash.grossProfit),
+      qris: rp(paymentSummary.qris.grossProfit),
+      total: rp(paymentSummary.total.grossProfit),
+      tone: 'success',
+    },
+    {
+      label: 'Pengeluaran Operasional',
+      cash: '-',
+      qris: '-',
+      total: totalOperationalExpenses > 0 ? `-${rp(totalOperationalExpenses)}` : 'Rp 0',
+      tone: 'danger',
+    },
+    {
+      label: 'Laba Bersih',
+      cash: '-',
+      qris: '-',
+      total: rp(netProfitAfterExpenses),
+      tone: 'successStrong',
+    },
+  ] as const;
 
   const buildProductAggregation = () => {
     const aggregated: Record<string, {
@@ -1244,7 +1404,7 @@ export default function Laporan() {
             </PopoverContent>
           </Popover>
 
-          <span className="text-xs text-muted-foreground">—</span>
+          <span className="text-xs text-muted-foreground">-</span>
 
           <Popover>
             <PopoverTrigger asChild>
@@ -1272,44 +1432,108 @@ export default function Laporan() {
         </div>
       )}
 
-      {/* Summary */}
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-3 text-center">
-            <ShoppingCart className="w-4 h-4 mx-auto text-primary mb-1" />
-            <p className="text-lg font-bold">{txCount}</p>
-            <p className="text-[10px] text-muted-foreground">Transaksi</p>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-3 text-center">
-            <TrendingUp className="w-4 h-4 mx-auto text-success mb-1" />
-            <p className="text-sm font-bold">{rp(totalSales)}</p>
-            <p className="text-[10px] text-muted-foreground">Penjualan</p>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-3 text-center">
-            <TrendingUp className="w-4 h-4 mx-auto text-accent mb-1" />
-            <p className="text-sm font-bold">{rp(totalProfit)}</p>
-            <p className="text-[10px] text-muted-foreground">Laba Kotor</p>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-3 text-center">
-            <ArrowDown className="w-4 h-4 mx-auto text-destructive mb-1" />
-            <p className="text-sm font-bold">{rp(totalOperationalExpenses)}</p>
-            <p className="text-[10px] text-muted-foreground">Pengeluaran</p>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-3 text-center">
-            <DollarSign className="w-4 h-4 mx-auto text-success mb-1" />
-            <p className="text-sm font-bold">{rp(netProfitAfterExpenses)}</p>
-            <p className="text-[10px] text-muted-foreground">Laba Bersih</p>
-          </CardContent>
-        </Card>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
+        {overviewCards.map((card) => {
+          const Icon = card.icon;
+          return (
+            <Card key={card.label} className="border-0 shadow-sm">
+              <CardContent className="flex items-start justify-between gap-3 p-4">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {card.label}
+                  </p>
+                  <p className={cn('mt-2 text-2xl font-bold leading-none', card.valueClassName)}>
+                    {card.value}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {card.caption}
+                  </p>
+                </div>
+                <div className="rounded-full bg-muted/60 p-2.5">
+                  <Icon className={cn('h-4 w-4', card.iconClassName)} />
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
+
+      {/* Summary */}
+      <Card className="border-0 shadow-sm overflow-hidden">
+        <CardHeader className="pb-3">
+          <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+            <div>
+              <CardTitle className="text-sm flex items-center gap-1.5">
+                <BarChart3 className="w-4 h-4 text-primary" />
+                Ringkasan Pembayaran
+              </CardTitle>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Cash dan QRIS dipisah agar lebih cepat dibaca. Pengeluaran operasional dan laba bersih tetap ditampilkan pada total keseluruhan.
+              </p>
+            </div>
+            {hasOtherPaymentMethods && (
+              <p className="text-[11px] text-muted-foreground">
+                Total mencakup metode lain di luar Cash dan QRIS.
+              </p>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="overflow-x-auto">
+            <div className="min-w-[720px] rounded-xl border border-border bg-background">
+              <div className="grid grid-cols-[1.4fr_1fr_1fr_1fr] bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <div className="border-b border-r border-border px-4 py-3">Keterangan</div>
+                <div className="border-b border-r border-border px-4 py-3 text-center">Cash</div>
+                <div className="border-b border-r border-border px-4 py-3 text-center">QRIS</div>
+                <div className="border-b border-border px-4 py-3 text-center">Total</div>
+              </div>
+
+              {summaryTableRows.map((row) => {
+                const rowToneClass = row.tone === 'danger'
+                  ? 'text-destructive'
+                  : row.tone === 'success' || row.tone === 'successStrong'
+                    ? 'text-success'
+                    : 'text-foreground';
+                const rowWeightClass = row.tone === 'neutral'
+                  ? 'font-semibold'
+                  : row.tone === 'defaultStrong' || row.tone === 'successStrong'
+                    ? 'font-bold'
+                    : 'font-medium';
+
+                return (
+                  <div key={row.label} className="grid grid-cols-[1.4fr_1fr_1fr_1fr] text-sm">
+                    <div
+                      className={cn(
+                        'border-b border-r border-border px-4 py-3',
+                        rowWeightClass,
+                        row.label === 'Laba Bersih' && 'bg-success/5',
+                      )}
+                    >
+                      {row.label}
+                    </div>
+                    <div className={cn('border-b border-r border-border px-4 py-3 text-right tabular-nums', rowToneClass, rowWeightClass)}>
+                      {row.cash}
+                    </div>
+                    <div className={cn('border-b border-r border-border px-4 py-3 text-right tabular-nums', rowToneClass, rowWeightClass)}>
+                      {row.qris}
+                    </div>
+                    <div
+                      className={cn(
+                        'border-b border-border px-4 py-3 text-right tabular-nums',
+                        rowToneClass,
+                        rowWeightClass,
+                        row.label === 'Laba Bersih' && 'bg-success/5',
+                      )}
+                    >
+                      {row.total}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Profit & Loss */}
       <Card className="border-0 shadow-sm">
@@ -1457,7 +1681,7 @@ export default function Laporan() {
                   </div>
                   <div className="text-right">
                     <p className="text-xs font-bold">{rp(p.netRevenue)}</p>
-                    <p className="text-[10px] text-muted-foreground">bersih · laba {rp(p.profit)}</p>
+                    <p className="text-[10px] text-muted-foreground">bersih - laba {rp(p.profit)}</p>
                   </div>
                 </div>
               ))}
@@ -1512,7 +1736,7 @@ export default function Laporan() {
                     <div className="min-w-0">
                       <p className="text-sm break-words">{log.warehouseItemName}</p>
                       <p className="text-[10px] text-muted-foreground break-words">
-                        {log.quantity} {log.unit} · {log.purpose}
+                        {log.quantity} {log.unit} - {log.purpose}
                       </p>
                     </div>
                     <p className="text-[10px] text-muted-foreground shrink-0">
@@ -1575,3 +1799,4 @@ export default function Laporan() {
     </div>
   );
 }
+
