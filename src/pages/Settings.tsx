@@ -20,12 +20,16 @@ import { toast } from 'sonner';
 import { exportBackupData } from '@/components/BackupReminder';
 import { performBackup, resolveCloudApiUrl } from '@/lib/backup';
 import { compressImage } from '@/lib/image-utils';
+import { APP_COMMIT_HASH, APP_VERSION, formatAppBuildTime } from '@/lib/app-version';
 import { useAuth } from '@/hooks/use-auth';
 import { createUser, hashPin, isValidPin, isValidUsername, saveSession } from '@/lib/auth';
 import { usePWAInstall } from '@/hooks/use-pwa-install';
 import { generateUUID } from '@/lib/utils';
 
 export default function Pengaturan() {
+  const buildInfoText = `v${APP_VERSION} • build ${APP_COMMIT_HASH}`;
+  const buildTimeText = formatAppBuildTime();
+
   const reviveDates = (obj: any): any => {
     if (obj === null || obj === undefined) return obj;
     const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d*)?(?:[-+]\d{2}:?\d{2}|Z)?$/;
@@ -1021,6 +1025,11 @@ export default function Pengaturan() {
            )}
         </CardContent>
       </Card>
+
+      <div className="pb-2 text-center text-[11px] leading-relaxed text-muted-foreground">
+        <p>Versi aplikasi {buildInfoText}</p>
+        <p>Build {buildTimeText}</p>
+      </div>
 
       {/* Install Help Dialog */}
       <Dialog open={installHelpOpen} onOpenChange={setInstallHelpOpen}>

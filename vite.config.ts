@@ -1,8 +1,24 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
+import { execSync } from "node:child_process";
 import { componentTagger } from "lovable-tagger";
 import { VitePWA } from "vite-plugin-pwa";
+
+const appVersion = process.env.npm_package_version || "0.0.0";
+const appBuildTime = new Date().toISOString();
+
+const getGitCommitHash = () => {
+  try {
+    return execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim();
+  } catch {
+    return "dev";
+  }
+};
+
+const appCommitHash = getGitCommitHash();
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -73,5 +89,10 @@ export default defineConfig(({ mode }) => ({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+  },
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+    __APP_BUILD_TIME__: JSON.stringify(appBuildTime),
+    __APP_COMMIT_HASH__: JSON.stringify(appCommitHash),
   },
 }));
