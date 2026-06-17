@@ -1772,162 +1772,168 @@ export default function Kasir() {
 
       {/* Checkout Dialog */}
       <Dialog open={checkoutOpen} onOpenChange={(open) => { if (!isCheckoutSubmitting) setCheckoutOpen(open); }}>
-        <DialogContent className="max-w-[95vw] rounded-xl">
-          <DialogHeader>
+        <DialogContent className="max-h-[calc(100dvh-1rem)] max-w-[95vw] overflow-hidden rounded-xl p-0 sm:max-w-3xl">
+          <DialogHeader className="px-4 pb-0 pt-4 sm:px-6 sm:pt-6">
             <DialogTitle>Pembayaran</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 mt-2">
-            <div className="text-center py-3 bg-primary/5 rounded-xl">
-              <p className="text-sm text-muted-foreground">Total Bayar</p>
-              <p className="text-3xl font-bold text-primary">{rp(total)}</p>
-            </div>
-
-            <div className="space-y-1.5">
-              <p className="text-sm font-medium">Metode Pembayaran</p>
-              <div className="grid grid-cols-3 gap-2">
-                {paymentMethods?.map(pm => (
-                  <button key={pm.id} disabled={isCheckoutSubmitting} onClick={() => setPaymentMethodId(pm.id!.toString())} className={cn('p-3 rounded-xl text-xs font-semibold border-2 transition-colors disabled:opacity-60', paymentMethodId === pm.id!.toString() ? 'border-primary bg-primary/5 text-primary' : 'border-muted bg-muted/50 text-muted-foreground')}>
-                    {pm.name}
-                  </button>
-                ))}
+          <div
+            className="mt-2 overflow-y-auto px-4 pb-4 sm:px-6"
+            style={{ WebkitOverflowScrolling: 'touch' }}
+          >
+            <div className="space-y-4 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
+              <div className="text-center py-3 bg-primary/5 rounded-xl">
+                <p className="text-sm text-muted-foreground">Total Bayar</p>
+                <p className="text-3xl font-bold text-primary">{rp(total)}</p>
               </div>
-            </div>
 
-            <div className="space-y-1.5">
-              <p className="text-sm font-medium">Jumlah Bayar</p>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-bold text-lg select-none">Rp</span>
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  className="pl-10 pr-3 h-12 text-lg font-bold text-center w-full"
-                  value={paymentAmount ? Number(paymentAmount).toLocaleString('id-ID') : ''}
-                  onChange={(e) => {
-                    if (isCheckoutSubmitting) return;
-                    const cleanVal = e.target.value.replace(/\D/g, '');
-                    const finalVal = cleanVal ? String(Number(cleanVal)) : '';
-                    setPaymentAmount(finalVal);
-                    setIsQuickAdding(!!finalVal);
-                  }}
-                  onFocus={(e) => e.target.select()}
-                  placeholder="0"
-                />
+              <div className="space-y-1.5">
+                <p className="text-sm font-medium">Metode Pembayaran</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {paymentMethods?.map(pm => (
+                    <button key={pm.id} disabled={isCheckoutSubmitting} onClick={() => setPaymentMethodId(pm.id!.toString())} className={cn('p-3 rounded-xl text-xs font-semibold border-2 transition-colors disabled:opacity-60', paymentMethodId === pm.id!.toString() ? 'border-primary bg-primary/5 text-primary' : 'border-muted bg-muted/50 text-muted-foreground')}>
+                      {pm.name}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {[1000, 2000, 5000, 10000, 20000, 50000, 100000].map(nom => (
-                  <button
-                    key={nom}
-                    onClick={() => {
+
+              <div className="space-y-1.5">
+                <p className="text-sm font-medium">Jumlah Bayar</p>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-bold text-lg select-none">Rp</span>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    className="pl-10 pr-3 h-12 text-lg font-bold text-center w-full"
+                    value={paymentAmount ? Number(paymentAmount).toLocaleString('id-ID') : ''}
+                    onChange={(e) => {
                       if (isCheckoutSubmitting) return;
-                      if (!isQuickAdding) {
-                        setPaymentAmount(String(nom));
-                        setIsQuickAdding(true);
-                      } else {
-                        setPaymentAmount(prev => String((Number(prev) || 0) + nom));
-                      }
+                      const cleanVal = e.target.value.replace(/\D/g, '');
+                      const finalVal = cleanVal ? String(Number(cleanVal)) : '';
+                      setPaymentAmount(finalVal);
+                      setIsQuickAdding(!!finalVal);
                     }}
-                    className="flex-1 min-w-[calc(25%-6px)] h-9 rounded-lg border border-border bg-muted/50 text-xs font-semibold text-foreground hover:bg-primary/10 hover:border-primary hover:text-primary active:scale-95 transition-all"
+                    onFocus={(e) => e.target.select()}
+                    placeholder="0"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {[1000, 2000, 5000, 10000, 20000, 50000, 100000].map(nom => (
+                    <button
+                      key={nom}
+                      onClick={() => {
+                        if (isCheckoutSubmitting) return;
+                        if (!isQuickAdding) {
+                          setPaymentAmount(String(nom));
+                          setIsQuickAdding(true);
+                        } else {
+                          setPaymentAmount(prev => String((Number(prev) || 0) + nom));
+                        }
+                      }}
+                      className="flex-1 min-w-[calc(25%-6px)] h-9 rounded-lg border border-border bg-muted/50 text-xs font-semibold text-foreground hover:bg-primary/10 hover:border-primary hover:text-primary active:scale-95 transition-all"
+                    >
+                      {nom >= 1000 ? `${(nom / 1000)}K` : nom}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => { if (isCheckoutSubmitting) return; setPaymentAmount(total.toString()); setIsQuickAdding(false); }}
+                    className="flex-1 min-w-[calc(25%-6px)] h-9 rounded-lg border border-primary/30 bg-primary/5 text-xs font-semibold text-primary hover:bg-primary/10 active:scale-95 transition-all"
                   >
-                    {nom >= 1000 ? `${(nom / 1000)}K` : nom}
+                    Uang Pas
                   </button>
-                ))}
+                </div>
                 <button
-                  onClick={() => { if (isCheckoutSubmitting) return; setPaymentAmount(total.toString()); setIsQuickAdding(false); }}
-                  className="flex-1 min-w-[calc(25%-6px)] h-9 rounded-lg border border-primary/30 bg-primary/5 text-xs font-semibold text-primary hover:bg-primary/10 active:scale-95 transition-all"
+                  onClick={() => { if (isCheckoutSubmitting) return; setPaymentAmount('0'); setIsQuickAdding(false); }}
+                  className="w-full text-xs text-muted-foreground hover:text-destructive transition-colors py-1"
                 >
-                  Uang Pas
-                </button>
-              </div>
-              <button
-                onClick={() => { if (isCheckoutSubmitting) return; setPaymentAmount('0'); setIsQuickAdding(false); }}
-                className="w-full text-xs text-muted-foreground hover:text-destructive transition-colors py-1"
-              >
-                Reset
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              {/* Service Type Toggle */}
-              <div className="grid grid-cols-2 gap-1 p-1 bg-muted rounded-xl">
-                <button
-                  type="button"
-                  onClick={() => setServiceType('dine_in')}
-                  className={cn(
-                    "flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold transition-all",
-                    serviceType === 'dine_in'
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <Utensils className="w-3.5 h-3.5" />
-                  Dine In
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setServiceType('take_away');
-                    setTableNumber('');
-                  }}
-                  className={cn(
-                    "flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold transition-all",
-                    serviceType === 'take_away'
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <ShoppingBag className="w-3.5 h-3.5" />
-                  Take Away
+                  Reset
                 </button>
               </div>
 
-              <div className="relative">
-                <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                <Input
-                  placeholder="Nama kasir"
-                  value={cashierNameInput}
-                  onChange={e => setCashierNameInput(e.target.value)}
-                  className="pl-8 h-10 text-sm"
-                />
-              </div>
+              <div className="space-y-2">
+                {/* Service Type Toggle */}
+                <div className="grid grid-cols-2 gap-1 p-1 bg-muted rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setServiceType('dine_in')}
+                    className={cn(
+                      "flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                      serviceType === 'dine_in'
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <Utensils className="w-3.5 h-3.5" />
+                    Dine In
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setServiceType('take_away');
+                      setTableNumber('');
+                    }}
+                    className={cn(
+                      "flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                      serviceType === 'take_away'
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <ShoppingBag className="w-3.5 h-3.5" />
+                    Take Away
+                  </button>
+                </div>
 
-              <div className="flex gap-2">
-                <div className="relative flex-1">
+                <div className="relative">
                   <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                   <Input
-                    placeholder="Nama pelanggan"
-                    value={customerName}
-                    onChange={e => setCustomerName(e.target.value)}
+                    placeholder="Nama kasir"
+                    value={cashierNameInput}
+                    onChange={e => setCashierNameInput(e.target.value)}
                     className="pl-8 h-10 text-sm"
                   />
                 </div>
-                {serviceType === 'dine_in' && (
-                  <div className="relative flex-[0.7] animate-in fade-in zoom-in-95 duration-150">
-                    <Hash className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                     <Input
-                      placeholder="Meja"
-                      value={tableNumber}
-                      onChange={e => setTableNumber(e.target.value)}
+                      placeholder="Nama pelanggan"
+                      value={customerName}
+                      onChange={e => setCustomerName(e.target.value)}
                       className="pl-8 h-10 text-sm"
                     />
                   </div>
-                )}
+                  {serviceType === 'dine_in' && (
+                    <div className="relative flex-[0.7] animate-in fade-in zoom-in-95 duration-150">
+                      <Hash className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                      <Input
+                        placeholder="Meja"
+                        value={tableNumber}
+                        onChange={e => setTableNumber(e.target.value)}
+                        className="pl-8 h-10 text-sm"
+                      />
+                    </div>
+                  )}
+                </div>
+                <Input
+                  placeholder="Catatan tambahan (opsional)"
+                  value={remarks}
+                  onChange={e => setRemarks(e.target.value)}
+                  className="h-10"
+                />
               </div>
-              <Input
-                placeholder="Catatan tambahan (opsional)"
-                value={remarks}
-                onChange={e => setRemarks(e.target.value)}
-                className="h-10"
-              />
+
+              {paidAmount >= total && (
+                <div className="flex justify-between items-center bg-success/10 p-3 rounded-xl">
+                  <span className="text-sm font-medium">Kembalian</span>
+                  <span className="text-lg font-bold text-success">Rp {change.toLocaleString('id-ID')}</span>
+                </div>
+              )}
             </div>
-
-            {paidAmount >= total && (
-              <div className="flex justify-between items-center bg-success/10 p-3 rounded-xl">
-                <span className="text-sm font-medium">Kembalian</span>
-                <span className="text-lg font-bold text-success">Rp {change.toLocaleString('id-ID')}</span>
-              </div>
-            )}
-
+          </div>
+          <div className="border-t bg-background px-4 pb-[max(1rem,env(safe-area-inset-bottom,1rem))] pt-3 sm:px-6">
             <Button className="w-full h-12 text-base font-semibold" onClick={handleCheckout} disabled={isCheckoutSubmitting || !paymentMethodId || paidAmount < total}>
               <Check className="w-5 h-5 mr-2" />
               {isCheckoutSubmitting ? 'Menyimpan Transaksi...' : 'Konfirmasi Transaksi'}
