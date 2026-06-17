@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Transaction, type TransactionItemRecord, adjustConfiguredStock } from '@/lib/db';
+import { db, type Transaction, type TransactionItemRecord, adjustConfiguredStock, repairInventoryAnomalies } from '@/lib/db';
 import { useState, useEffect } from 'react';
 import { format, startOfDay, endOfDay } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
@@ -142,8 +142,14 @@ export default function TransactionHistory() {
       if (restoreStock) {
         const items = getTxItems(selectedTx.id);
         for (const item of items) {
-          await adjustConfiguredStock(item.productId, -item.quantity, item.selectedOptions?.map(option => option.optionId) ?? []);
+          await adjustConfiguredStock(
+            item.productId,
+            -item.quantity,
+            item.selectedOptions?.map(option => option.optionId) ?? [],
+            { skipRepair: true }
+          );
         }
+        await repairInventoryAnomalies();
       }
       await db.transactionItems.where('transactionId').equals(selectedTx.id).delete();
       await db.transactions.delete(selectedTx.id);

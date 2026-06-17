@@ -109,6 +109,51 @@ export default function Produk() {
   const getOptionRecipes = (optionId?: number) => (productOptionRecipes ?? [])
     .filter(recipe => recipe.optionId === optionId);
 
+  const getGroupSelectionCandidates = (product: Product, groupId?: number) => {
+    const group = getProductGroups(product.id).find(item => item.id === groupId);
+    const optionsForGroup = getGroupOptions(groupId);
+
+    if (!group) return [];
+
+    const defaultSelection = optionsForGroup
+      .filter(option => option.isDefault === 1)
+      .map(option => option.id!)
+      .filter(Boolean)
+      .slice(0, Math.max(1, group.maxSelect || 1));
+
+    const minSelect = group.required === 1 ? Math.max(1, group.minSelect || 1) : Math.max(0, group.minSelect || 0);
+    const maxSelect = Math.max(minSelect, Math.min(group.maxSelect || optionsForGroup.length || minSelect, optionsForGroup.length));
+    const candidates = new Map<string, number[]>();
+    const push = (selection: number[]) => {
+      const normalized = [...selection].sort((a, b) => a - b);
+      candidates.set(normalized.join(':'), normalized);
+    };
+
+    const optionIds = optionsForGroup.map(option => option.id!).filter(Boolean);
+    const walk = (startIndex: number, selected: number[]) => {
+      if (selected.length >= minSelect && selected.length <= maxSelect) {
+        push(selected);
+      }
+
+      if (selected.length === maxSelect) {
+        return;
+      }
+
+      for (let index = startIndex; index < optionIds.length; index += 1) {
+        selected.push(optionIds[index]);
+        walk(index + 1, selected);
+        selected.pop();
+      }
+    };
+
+    if (defaultSelection.length > 0) {
+      push(defaultSelection);
+    }
+
+    walk(0, []);
+    return Array.from(candidates.values());
+  };
+
   const getDisplayStockForProduct = (product: Product) => {
     const groups = getProductGroups(product.id);
     const defaultIds = getDefaultOptionIdsForProduct(
@@ -157,19 +202,19 @@ export default function Produk() {
     const groupSelections = groups.map(group => {
       const options = getGroupOptions(group.id);
       const defaultSelection = defaultIds.filter(optionId => options.some(option => option.id === optionId));
-      const candidates = new Map<string, number[]>();
-      const push = (selection: number[]) => {
-        const normalized = [...selection].sort((a, b) => a - b);
-        candidates.set(normalized.join(':'), normalized);
-      };
-
-      push(defaultSelection);
-      if (group.required !== 1 || group.minSelect === 0) {
-        push([]);
+      const selections = getGroupSelectionCandidates(product, group.id);
+      if (defaultSelection.length === 0) {
+        return selections;
       }
-      options.forEach(option => push([option.id!]));
 
-      return Array.from(candidates.values());
+      const withDefaultsFirst = new Map<string, number[]>();
+      const normalizedDefaults = [...defaultSelection].sort((a, b) => a - b);
+      withDefaultsFirst.set(normalizedDefaults.join(':'), normalizedDefaults);
+      selections.forEach(selection => {
+        const normalized = [...selection].sort((a, b) => a - b);
+        withDefaultsFirst.set(normalized.join(':'), normalized);
+      });
+      return Array.from(withDefaultsFirst.values());
     });
 
     const stockValues: number[] = [];

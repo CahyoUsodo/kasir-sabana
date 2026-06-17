@@ -932,14 +932,6 @@ export function getDefaultOptionSelection(
       continue;
     }
 
-    if (group.required === 1) {
-      selection[group.id!] = groupOptions
-        .slice(0, Math.max(1, group.minSelect || 1))
-        .map(option => option.id!)
-        .filter(Boolean);
-      continue;
-    }
-
     selection[group.id!] = [];
   }
 
@@ -956,6 +948,28 @@ export function getDefaultOptionIdsForProduct(
 
 export function buildStockKey(productId: number, selectedOptionIds: number[] = []) {
   return [productId, ...selectedOptionIds.slice().sort((a, b) => a - b)].join(':');
+}
+
+function buildOptionCombinationCandidates(optionIds: number[], minSelect: number, maxSelect: number) {
+  const results: number[][] = [];
+  const walk = (startIndex: number, selected: number[]) => {
+    if (selected.length >= minSelect && selected.length <= maxSelect) {
+      results.push([...selected]);
+    }
+
+    if (selected.length === maxSelect) {
+      return;
+    }
+
+    for (let index = startIndex; index < optionIds.length; index += 1) {
+      selected.push(optionIds[index]);
+      walk(index + 1, selected);
+      selected.pop();
+    }
+  };
+
+  walk(0, []);
+  return results;
 }
 
 function buildOptionSelectionCandidatesForProduct(
@@ -977,22 +991,24 @@ function buildOptionSelectionCandidatesForProduct(
       .filter(option => option.groupId === group.id && option.isDeleted === 0)
       .sort((a, b) => a.sortOrder - b.sortOrder);
     const defaultIds = [...(defaultSelection[group.id!] ?? [])].sort((a, b) => a - b);
+    const minSelect = group.required === 1 ? Math.max(1, group.minSelect || 1) : Math.max(0, group.minSelect || 0);
+    const maxSelect = Math.max(minSelect, Math.min(group.maxSelect || groupOptions.length || minSelect, groupOptions.length));
     const candidates = new Map<string, number[]>();
     const push = (selection: number[]) => {
       const normalized = [...selection].sort((a, b) => a - b);
       candidates.set(normalized.join(':'), normalized);
     };
 
-    push(defaultIds);
-
-    if (group.required !== 1 || group.minSelect === 0) {
-      push([]);
+    if (defaultIds.length > 0) {
+      push(defaultIds);
     }
 
-    if (group.maxSelect <= 1) {
-      groupOptions.forEach(option => push([option.id!]));
-    } else {
-      groupOptions.forEach(option => push([option.id!]));
+    for (const combination of buildOptionCombinationCandidates(
+      groupOptions.map(option => option.id!).filter(Boolean),
+      minSelect,
+      maxSelect
+    )) {
+      push(combination);
     }
 
     return { groupId: group.id!, selections: Array.from(candidates.values()) };
@@ -1194,10 +1210,21 @@ export async function adjustWarehouseStock(productId: number, qtyDelta: number) 
   }
 }
 
-export async function adjustConfiguredStock(productId: number, qtyDelta: number, selectedOptionIds: number[] = []) {
+export interface AdjustConfiguredStockOptions {
+  skipRepair?: boolean;
+}
+
+export async function adjustConfiguredStock(
+  productId: number,
+  qtyDelta: number,
+  selectedOptionIds: number[] = [],
+  options: AdjustConfiguredStockOptions = {}
+) {
   if (productId < 0) {
     await adjustWarehouseStock(productId, qtyDelta);
-    await repairInventoryAnomalies();
+    if (!options.skipRepair) {
+      await repairInventoryAnomalies();
+    }
     return;
   }
 
@@ -1211,7 +1238,9 @@ export async function adjustConfiguredStock(productId: number, qtyDelta: number,
         updatedAt: new Date()
       });
     }
-    await repairInventoryAnomalies();
+    if (!options.skipRepair) {
+      await repairInventoryAnomalies();
+    }
     return;
   }
 
@@ -1224,7 +1253,9 @@ export async function adjustConfiguredStock(productId: number, qtyDelta: number,
       });
     }
   }
-  await repairInventoryAnomalies();
+  if (!options.skipRepair) {
+    await repairInventoryAnomalies();
+  }
 }
 
 export async function repairInventoryAnomalies() {

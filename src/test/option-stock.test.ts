@@ -3,6 +3,7 @@ import {
   adjustConfiguredStock,
   db,
   getAvailableStockForSelection,
+  getBestAvailableStockForProduct,
   getConfiguredProductReceiptDetails,
   getDefaultOptionIdsForProduct,
   getProductStockUsage,
@@ -245,7 +246,7 @@ describe("configured product stock", () => {
     ).resolves.toEqual(["Sayap", "Sambal Ijo", "Nasi"]);
   });
 
-  it("uses required default package options when calculating display stock", async () => {
+  it("keeps required groups empty until an explicit default is set", async () => {
     const now = new Date();
 
     const riceId = await db.warehouseItems.add({
@@ -396,7 +397,145 @@ describe("configured product stock", () => {
     const options = await db.productOptions.toArray();
     const defaultOptionIds = getDefaultOptionIdsForProduct(productId, groups, options);
 
-    expect(defaultOptionIds).toEqual([chickenOptionId, drinkOptionId, riceOptionId]);
-    await expect(getAvailableStockForSelection(productId, defaultOptionIds)).resolves.toBe(20);
+    expect(defaultOptionIds).toEqual([]);
+
+    await db.productOptions.update(chickenOptionId, { isDefault: 1 });
+    await db.productOptions.update(drinkOptionId, { isDefault: 1 });
+    await db.productOptions.update(riceOptionId, { isDefault: 1 });
+
+    const refreshedOptions = await db.productOptions.toArray();
+    const explicitDefaultIds = getDefaultOptionIdsForProduct(productId, groups, refreshedOptions);
+
+    expect(explicitDefaultIds).toEqual([chickenOptionId, drinkOptionId, riceOptionId]);
+    await expect(getAvailableStockForSelection(productId, explicitDefaultIds)).resolves.toBe(20);
+  });
+
+  it("uses the best valid variant stock instead of the first required option", async () => {
+    const now = new Date();
+
+    const fruitTeaProductId = await db.products.add({
+      name: "Fruit Tea 250ml",
+      sku: "FT-250",
+      categoryId: 2,
+      price: 3500,
+      hpp: 1500,
+      stock: 999,
+      unit: "pcs",
+      description: "Minuman fruit tea",
+      isDeleted: 0,
+      deletedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const variantGroupId = await db.productOptionGroups.add({
+      productId: fruitTeaProductId,
+      name: "Varian",
+      required: 1,
+      minSelect: 1,
+      maxSelect: 1,
+      sortOrder: 1,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const blackcurrantStockId = await db.warehouseItems.add({
+      name: "Fruit Tea Blackcurrant",
+      stock: 0,
+      unit: "pcs",
+      isCashierVisible: 0,
+      price: 0,
+      isDailyReset: 0,
+      lastPreparedDate: "",
+      dailyPrepQty: 0,
+      dailyPrepFactor: 1,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const appleStockId = await db.warehouseItems.add({
+      name: "Fruit Tea Apple",
+      stock: 7,
+      unit: "pcs",
+      isCashierVisible: 0,
+      price: 0,
+      isDailyReset: 0,
+      lastPreparedDate: "",
+      dailyPrepQty: 0,
+      dailyPrepFactor: 1,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const lemonStockId = await db.warehouseItems.add({
+      name: "Fruit Tea Lemon",
+      stock: 5,
+      unit: "pcs",
+      isCashierVisible: 0,
+      price: 0,
+      isDailyReset: 0,
+      lastPreparedDate: "",
+      dailyPrepQty: 0,
+      dailyPrepFactor: 1,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const blackcurrantOptionId = await db.productOptions.add({
+      groupId: variantGroupId,
+      name: "Blackcurrant",
+      priceDelta: 0,
+      hppDelta: 0,
+      sortOrder: 1,
+      isDefault: 0,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const appleOptionId = await db.productOptions.add({
+      groupId: variantGroupId,
+      name: "Apel",
+      priceDelta: 0,
+      hppDelta: 0,
+      sortOrder: 2,
+      isDefault: 0,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const lemonOptionId = await db.productOptions.add({
+      groupId: variantGroupId,
+      name: "Lemon",
+      priceDelta: 0,
+      hppDelta: 0,
+      sortOrder: 3,
+      isDefault: 0,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.productOptionRecipes.bulkAdd([
+      { optionId: blackcurrantOptionId, warehouseItemId: blackcurrantStockId, quantity: 1 },
+      { optionId: appleOptionId, warehouseItemId: appleStockId, quantity: 1 },
+      { optionId: lemonOptionId, warehouseItemId: lemonStockId, quantity: 1 },
+    ]);
+
+    expect(getDefaultOptionIdsForProduct(
+      fruitTeaProductId,
+      await db.productOptionGroups.toArray(),
+      await db.productOptions.toArray()
+    )).toEqual([]);
+
+    await expect(getAvailableStockForSelection(fruitTeaProductId, [blackcurrantOptionId])).resolves.toBe(0);
+    await expect(getAvailableStockForSelection(fruitTeaProductId, [appleOptionId])).resolves.toBe(7);
+    await expect(getAvailableStockForSelection(fruitTeaProductId, [lemonOptionId])).resolves.toBe(5);
+    await expect(getBestAvailableStockForProduct(fruitTeaProductId)).resolves.toBe(7);
   });
 });

@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Product, type Category, type Transaction, type TransactionItemRecord, type CartOptionSnapshot, adjustConfiguredStock, buildStockKey, getAvailableStockForSelection, getConfiguredProductReceiptDetails, getActiveDailyPrepFormulas, getMainDailyPrepItems, getDefaultOptionSelection, getSelectedOptionIds } from '@/lib/db';
+import { db, type Product, type Category, type Transaction, type TransactionItemRecord, type CartOptionSnapshot, adjustConfiguredStock, buildStockKey, getAvailableStockForSelection, getConfiguredProductReceiptDetails, getActiveDailyPrepFormulas, getMainDailyPrepItems, getDefaultOptionSelection, getSelectedOptionIds, repairInventoryAnomalies } from '@/lib/db';
 import { useState, useRef, useEffect } from 'react';
 import { Search, Plus, Minus, ShoppingCart, X, Percent, Tag, CreditCard, Banknote, Check, Package as PackageIcon, Pencil, User, Hash, Utensils, ShoppingBag, Warehouse } from 'lucide-react';
 import Receipt from '@/components/Receipt';
@@ -58,6 +58,7 @@ export default function Kasir() {
   const [itemDiscountValue, setItemDiscountValue] = useState('');
   const [paymentMethodId, setPaymentMethodId] = useState<string>('');
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [isCheckoutSubmitting, setIsCheckoutSubmitting] = useState(false);
   const [isQuickAdding, setIsQuickAdding] = useState(false);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [lastTransaction, setLastTransaction] = useState<Transaction | null>(null);
@@ -71,6 +72,7 @@ export default function Kasir() {
   const [tempItemNotes, setTempItemNotes] = useState('');
   const loadTransactionForEditingRef = useRef<((txId: number) => Promise<void>) | null>(null);
   const doFullResetRef = useRef<(() => void) | null>(null);
+  const checkoutBatchRef = useRef(false);
 
   const [prepModalOpen, setPrepModalOpen] = useState(false);
   const [prepCounts, setPrepCounts] = useState<Record<number, string>>({});
@@ -212,6 +214,51 @@ export default function Kasir() {
   const getDefaultSelectionForProduct = (product: Product) =>
     getDefaultOptionSelection(product.id, productOptionGroups ?? [], productOptions ?? []);
 
+  const getGroupSelectionCandidates = (product: Product, groupId?: number) => {
+    const group = getProductGroups(product.id).find(item => item.id === groupId);
+    const optionsForGroup = getGroupOptions(groupId);
+
+    if (!group) return [];
+
+    const defaultSelection = optionsForGroup
+      .filter(option => option.isDefault === 1)
+      .map(option => option.id!)
+      .filter(Boolean)
+      .slice(0, Math.max(1, group.maxSelect || 1));
+
+    const minSelect = group.required === 1 ? Math.max(1, group.minSelect || 1) : Math.max(0, group.minSelect || 0);
+    const maxSelect = Math.max(minSelect, Math.min(group.maxSelect || optionsForGroup.length || minSelect, optionsForGroup.length));
+    const candidates = new Map<string, number[]>();
+    const push = (selection: number[]) => {
+      const normalized = [...selection].sort((a, b) => a - b);
+      candidates.set(normalized.join(':'), normalized);
+    };
+
+    const optionIds = optionsForGroup.map(option => option.id!).filter(Boolean);
+    const walk = (startIndex: number, selected: number[]) => {
+      if (selected.length >= minSelect && selected.length <= maxSelect) {
+        push(selected);
+      }
+
+      if (selected.length === maxSelect) {
+        return;
+      }
+
+      for (let index = startIndex; index < optionIds.length; index += 1) {
+        selected.push(optionIds[index]);
+        walk(index + 1, selected);
+        selected.pop();
+      }
+    };
+
+    if (defaultSelection.length > 0) {
+      push(defaultSelection);
+    }
+
+    walk(0, []);
+    return Array.from(candidates.values());
+  };
+
   const getWarehouseUsageForConfiguration = (productId?: number, selectedOptionIds: number[] = []) => {
     const usage = new Map<number, number>();
     const recipes = (productRecipes ?? []).filter(recipe => recipe.productId === productId);
@@ -294,19 +341,20 @@ export default function Kasir() {
     }
 
     const groupSelections = groups.map(group => {
-      const candidates = new Map<string, number[]>();
-      const push = (selection: number[]) => {
-        const normalized = [...selection].sort((a, b) => a - b);
-        candidates.set(normalized.join(':'), normalized);
-      };
-
-      push(defaultSelection[group.id!] ?? []);
-      if (group.required !== 1 || group.minSelect === 0) {
-        push([]);
+      const explicitDefaults = defaultSelection[group.id!] ?? [];
+      const selections = getGroupSelectionCandidates(product, group.id);
+      if (explicitDefaults.length === 0) {
+        return { groupId: group.id!, selections };
       }
-      getGroupOptions(group.id).forEach(option => push([option.id!]));
 
-      return { groupId: group.id!, selections: Array.from(candidates.values()) };
+      const withDefaultsFirst = new Map<string, number[]>();
+      const normalizedDefaults = [...explicitDefaults].sort((a, b) => a - b);
+      withDefaultsFirst.set(normalizedDefaults.join(':'), normalizedDefaults);
+      selections.forEach(selection => {
+        const normalized = [...selection].sort((a, b) => a - b);
+        withDefaultsFirst.set(normalized.join(':'), normalized);
+      });
+      return { groupId: group.id!, selections: Array.from(withDefaultsFirst.values()) };
     });
 
     const availability: number[] = [];
@@ -900,7 +948,12 @@ export default function Kasir() {
   };
 
   const applyStockDelta = async (productId: number, qtyDelta: number, selectedOptions: CartOptionSnapshot[] = []) => {
-    await adjustConfiguredStock(productId, qtyDelta, selectedOptions.map(option => option.optionId));
+    await adjustConfiguredStock(
+      productId,
+      qtyDelta,
+      selectedOptions.map(option => option.optionId),
+      { skipRepair: checkoutBatchRef.current }
+    );
   };
 
   const updateItemNotes = (stockKey: string, notes: string) => {
@@ -977,12 +1030,27 @@ export default function Kasir() {
   // === Checkout ===
 
   const handleCheckout = async () => {
+    if (isCheckoutSubmitting) return;
     if (!paymentMethodId || paidAmount < total) return;
     const finalCashierName = cashierNameInput.trim() || currentUser?.name?.trim() || '';
     if (!finalCashierName) {
       toast.error('Nama kasir wajib diisi');
       return;
     }
+
+    setIsCheckoutSubmitting(true);
+    checkoutBatchRef.current = true;
+
+    await new Promise<void>(resolve => {
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => resolve());
+        return;
+      }
+
+      setTimeout(resolve, 0);
+    });
+
+    try {
 
     if (editingTxId) {
       // Update existing open bill → paid
@@ -1054,6 +1122,8 @@ export default function Kasir() {
         }
       }
 
+      await repairInventoryAnomalies();
+
       const updatedTx = await db.transactions.get(editingTxId);
       toast.success(`Transaksi berhasil! ${updatedTx?.receiptNumber}`);
       setLastTransaction(updatedTx || null);
@@ -1117,6 +1187,8 @@ export default function Kasir() {
         await applyStockDelta(item.product.id!, item.qty, item.selectedOptions);
       }
 
+      await repairInventoryAnomalies();
+
       toast.success(`Transaksi berhasil! ${receiptNumber}`);
       setLastTransaction({ ...txData, id: txId as number });
       setLastTxItems(itemRecords);
@@ -1126,6 +1198,13 @@ export default function Kasir() {
     doFullReset();
     setCheckoutOpen(false);
     setCartOpen(false);
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : 'Gagal menyimpan transaksi');
+    } finally {
+      checkoutBatchRef.current = false;
+      setIsCheckoutSubmitting(false);
+    }
   };
 
   const cartCount = cart.reduce((s, c) => s + c.qty, 0);
@@ -1771,7 +1850,7 @@ export default function Kasir() {
       </Dialog>
 
       {/* Checkout Dialog */}
-      <Dialog open={checkoutOpen} onOpenChange={setCheckoutOpen}>
+      <Dialog open={checkoutOpen} onOpenChange={(open) => { if (!isCheckoutSubmitting) setCheckoutOpen(open); }}>
         <DialogContent className="max-w-[95vw] rounded-xl">
           <DialogHeader>
             <DialogTitle>Pembayaran</DialogTitle>
@@ -1786,7 +1865,7 @@ export default function Kasir() {
               <p className="text-sm font-medium">Metode Pembayaran</p>
               <div className="grid grid-cols-3 gap-2">
                 {paymentMethods?.map(pm => (
-                  <button key={pm.id} onClick={() => setPaymentMethodId(pm.id!.toString())} className={cn('p-3 rounded-xl text-xs font-semibold border-2 transition-colors', paymentMethodId === pm.id!.toString() ? 'border-primary bg-primary/5 text-primary' : 'border-muted bg-muted/50 text-muted-foreground')}>
+                  <button key={pm.id} disabled={isCheckoutSubmitting} onClick={() => setPaymentMethodId(pm.id!.toString())} className={cn('p-3 rounded-xl text-xs font-semibold border-2 transition-colors disabled:opacity-60', paymentMethodId === pm.id!.toString() ? 'border-primary bg-primary/5 text-primary' : 'border-muted bg-muted/50 text-muted-foreground')}>
                     {pm.name}
                   </button>
                 ))}
@@ -1804,6 +1883,7 @@ export default function Kasir() {
                   className="pl-10 pr-3 h-12 text-lg font-bold text-center w-full"
                   value={paymentAmount ? Number(paymentAmount).toLocaleString('id-ID') : ''}
                   onChange={(e) => {
+                    if (isCheckoutSubmitting) return;
                     const cleanVal = e.target.value.replace(/\D/g, '');
                     const finalVal = cleanVal ? String(Number(cleanVal)) : '';
                     setPaymentAmount(finalVal);
@@ -1818,6 +1898,7 @@ export default function Kasir() {
                   <button
                     key={nom}
                     onClick={() => {
+                      if (isCheckoutSubmitting) return;
                       if (!isQuickAdding) {
                         setPaymentAmount(String(nom));
                         setIsQuickAdding(true);
@@ -1831,14 +1912,14 @@ export default function Kasir() {
                   </button>
                 ))}
                 <button
-                  onClick={() => { setPaymentAmount(total.toString()); setIsQuickAdding(false); }}
+                  onClick={() => { if (isCheckoutSubmitting) return; setPaymentAmount(total.toString()); setIsQuickAdding(false); }}
                   className="flex-1 min-w-[calc(25%-6px)] h-9 rounded-lg border border-primary/30 bg-primary/5 text-xs font-semibold text-primary hover:bg-primary/10 active:scale-95 transition-all"
                 >
                   Uang Pas
                 </button>
               </div>
               <button
-                onClick={() => { setPaymentAmount('0'); setIsQuickAdding(false); }}
+                onClick={() => { if (isCheckoutSubmitting) return; setPaymentAmount('0'); setIsQuickAdding(false); }}
                 className="w-full text-xs text-muted-foreground hover:text-destructive transition-colors py-1"
               >
                 Reset
@@ -1926,9 +2007,9 @@ export default function Kasir() {
               </div>
             )}
 
-            <Button className="w-full h-12 text-base font-semibold" onClick={handleCheckout} disabled={!paymentMethodId || paidAmount < total}>
+            <Button className="w-full h-12 text-base font-semibold" onClick={handleCheckout} disabled={isCheckoutSubmitting || !paymentMethodId || paidAmount < total}>
               <Check className="w-5 h-5 mr-2" />
-              Konfirmasi Transaksi
+              {isCheckoutSubmitting ? 'Menyimpan Transaksi...' : 'Konfirmasi Transaksi'}
             </Button>
           </div>
         </DialogContent>

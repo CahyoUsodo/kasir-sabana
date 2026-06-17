@@ -4,13 +4,12 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { lazy, Suspense, useEffect, type ComponentType } from "react";
+import { toast } from "sonner";
 import { checkVersion } from "@/lib/version-check";
 import { AuthProvider } from "@/hooks/use-auth";
 import AppLayout from "./components/layout/AppLayout";
 
 const queryClient = new QueryClient();
-
-import { useAutoBackup } from "@/hooks/useAutoBackup";
 
 import { db, repairInventoryAnomalies } from '@/lib/db';
 
@@ -75,10 +74,9 @@ const UsersPage = lazyWithChunkRecovery(loadUsersPage, "users");
 const WarehousePage = lazyWithChunkRecovery(loadWarehousePage, "warehouse");
 const DailyExpensesPage = lazyWithChunkRecovery(loadDailyExpensesPage, "daily-expenses");
 const NotFound = lazyWithChunkRecovery(loadNotFound, "not-found");
+const PWA_UPDATE_TOAST_ID = "pwa-update-ready";
 
 const App = () => {
-  useAutoBackup();
-
   useEffect(() => {
     checkVersion();
     
@@ -110,6 +108,68 @@ const App = () => {
       }
     };
     fixStringDates();
+  }, []);
+
+  useEffect(() => {
+    const isCashierRoute = () => {
+      const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
+      return pathname === "/cashier";
+    };
+
+    const applyPendingUpdate = async () => {
+      if (!window.__hasPendingPwaUpdate__ || !window.__applyPwaUpdate__) return;
+
+      try {
+        await window.__applyPwaUpdate__();
+      } catch (error) {
+        console.error("Failed to apply PWA update", error);
+      }
+    };
+
+    const handleUpdateReady = () => {
+      if (!isCashierRoute()) {
+        void applyPendingUpdate();
+        return;
+      }
+
+      toast.info("Versi baru aplikasi siap dipakai", {
+        id: PWA_UPDATE_TOAST_ID,
+        duration: Infinity,
+        description: "Tekan Perbarui agar perubahan terbaru langsung diterapkan. Update otomatis ditunda saat kasir sedang dibuka.",
+        action: {
+          label: "Perbarui",
+          onClick: () => {
+            void applyPendingUpdate();
+          },
+        },
+        cancel: {
+          label: "Nanti",
+          onClick: () => undefined,
+        },
+      });
+    };
+
+    const handleVisibilityChange = () => {
+      if (
+        document.visibilityState === "hidden" &&
+        window.__hasPendingPwaUpdate__ &&
+        !isCashierRoute()
+      ) {
+        void applyPendingUpdate();
+      }
+    };
+
+    window.addEventListener("pwa-update-ready", handleUpdateReady);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    if (window.__hasPendingPwaUpdate__) {
+      handleUpdateReady();
+    }
+
+    return () => {
+      window.removeEventListener("pwa-update-ready", handleUpdateReady);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, []);
 
   useEffect(() => {
