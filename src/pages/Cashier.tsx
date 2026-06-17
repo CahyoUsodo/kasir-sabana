@@ -1772,15 +1772,15 @@ export default function Kasir() {
 
       {/* Checkout Dialog */}
       <Dialog open={checkoutOpen} onOpenChange={(open) => { if (!isCheckoutSubmitting) setCheckoutOpen(open); }}>
-        <DialogContent className="max-h-[calc(100dvh-1rem)] max-w-[95vw] overflow-hidden rounded-xl p-0 sm:max-w-3xl">
-          <DialogHeader className="px-4 pb-0 pt-4 sm:px-6 sm:pt-6">
+        <DialogContent className="top-2 grid h-[calc(100dvh-1rem)] w-[95vw] max-w-3xl translate-y-0 grid-rows-[auto,minmax(0,1fr),auto] overflow-hidden rounded-xl p-0 sm:top-4 sm:h-[calc(100dvh-2rem)]">
+          <DialogHeader className="px-4 pb-0 pt-4 sm:px-6 sm:pt-5">
             <DialogTitle>Pembayaran</DialogTitle>
           </DialogHeader>
           <div
-            className="mt-2 overflow-y-auto px-4 pb-4 sm:px-6"
+            className="min-h-0 overflow-y-auto px-4 pb-4 pt-2 sm:px-6"
             style={{ WebkitOverflowScrolling: 'touch' }}
           >
-            <div className="space-y-4 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
+            <div className="space-y-4">
               <div className="text-center py-3 bg-primary/5 rounded-xl">
                 <p className="text-sm text-muted-foreground">Total Bayar</p>
                 <p className="text-3xl font-bold text-primary">{rp(total)}</p>
