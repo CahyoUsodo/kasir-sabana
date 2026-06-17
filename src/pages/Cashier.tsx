@@ -28,8 +28,6 @@ interface CartItem {
   notes?: string;
 }
 
-const CASHIER_DRAFT_KEY = 'kasir-draft-v1';
-
 export default function Kasir() {
   const { currentUser, can } = useAuth();
   const navigate = useNavigate();
@@ -78,7 +76,6 @@ export default function Kasir() {
   const [prepCounts, setPrepCounts] = useState<Record<number, string>>({});
   const [optionProduct, setOptionProduct] = useState<Product | null>(null);
   const [selectedOptionIds, setSelectedOptionIds] = useState<Record<number, number[]>>({});
-  const draftRestoredRef = useRef(false);
 
   const products = useLiveQuery(() => db.products.where('isDeleted').equals(0).toArray());
   const categories = useLiveQuery(() => db.categories.where('isDeleted').equals(0).toArray());
@@ -567,43 +564,14 @@ export default function Kasir() {
   }, [editTxIdParam, editingTxId]);
 
   useEffect(() => {
-    if (draftRestoredRef.current || editTxIdParam) return;
-    draftRestoredRef.current = true;
-
-    try {
-      const rawDraft = window.localStorage.getItem(CASHIER_DRAFT_KEY);
-      if (!rawDraft) return;
-      const draft = JSON.parse(rawDraft);
-
-      setCart(draft.cart ?? []);
-      setEditingTxId(draft.editingTxId ?? null);
-      setOriginalTx(draft.originalTx ? {
-        ...draft.originalTx,
-        date: new Date(draft.originalTx.date),
-        openedAt: draft.originalTx.openedAt ? new Date(draft.originalTx.openedAt) : undefined,
-        closedAt: draft.originalTx.closedAt ? new Date(draft.originalTx.closedAt) : undefined,
-      } : null);
-      setOriginalItems(draft.originalItems ?? []);
-      setOriginalQuantities(draft.originalQuantities ?? {});
-      setServiceType(draft.serviceType ?? 'dine_in');
-      setTxDiscountType(draft.txDiscountType ?? null);
-      setTxDiscountValue(draft.txDiscountValue ?? '');
-      setPaymentMethodId(draft.paymentMethodId ?? '');
-      setPaymentAmount(draft.paymentAmount ?? '');
-      setCustomerName(draft.customerName ?? '');
-      setCashierNameInput(draft.cashierNameInput ?? currentUser?.name ?? '');
-      setTableNumber(draft.tableNumber ?? '');
-      setRemarks(draft.remarks ?? '');
-    } catch (error) {
-      console.error('Failed to restore cashier draft', error);
-      window.localStorage.removeItem(CASHIER_DRAFT_KEY);
-    }
-  }, [editTxIdParam, currentUser?.name]);
-
-  useEffect(() => {
     if (editingTxId !== null) return;
     setCashierNameInput(prev => prev || currentUser?.name || '');
   }, [currentUser?.name, editingTxId]);
+
+  useEffect(() => {
+    // Remove any legacy cashier draft because draft persistence is disabled.
+    window.localStorage.removeItem('kasir-draft-v1');
+  }, []);
 
   const todayStr = new Date().toLocaleDateString('en-CA');
   const activeDailyPrepFormulas = getActiveDailyPrepFormulas(dailyPrepFormulas ?? [], visibleWarehouseItems ?? []);
@@ -762,60 +730,6 @@ export default function Kasir() {
     return matchSearch && matchCategory;
   }).sort(compareCashierProducts);
 
-  useEffect(() => {
-    if (!draftRestoredRef.current && !editTxIdParam) return;
-    const defaultCashierName = currentUser?.name?.trim() ?? '';
-
-    const shouldClearDraft =
-      cart.length === 0 &&
-      editingTxId === null &&
-      !customerName.trim() &&
-      (!cashierNameInput.trim() || cashierNameInput.trim() === defaultCashierName) &&
-      !tableNumber.trim() &&
-      !remarks.trim() &&
-      !txDiscountValue &&
-      !paymentMethodId &&
-      !paymentAmount;
-
-    if (shouldClearDraft) {
-      window.localStorage.removeItem(CASHIER_DRAFT_KEY);
-      return;
-    }
-
-    window.localStorage.setItem(CASHIER_DRAFT_KEY, JSON.stringify({
-      cart,
-      editingTxId,
-      originalTx,
-      originalItems,
-      originalQuantities,
-      serviceType,
-      txDiscountType,
-      txDiscountValue,
-      paymentMethodId,
-      paymentAmount,
-      customerName,
-      cashierNameInput,
-      tableNumber,
-      remarks,
-    }));
-  }, [
-    cart,
-    editingTxId,
-    originalTx,
-    originalItems,
-    originalQuantities,
-    serviceType,
-    txDiscountType,
-    txDiscountValue,
-    paymentMethodId,
-    paymentAmount,
-    customerName,
-    cashierNameInput,
-    tableNumber,
-    remarks,
-    currentUser?.name,
-  ]);
-
   const doFullReset = () => {
     setCart([]);
     setEditingTxId(null);
@@ -835,7 +749,6 @@ export default function Kasir() {
     if (searchParams.has('editTxId')) {
       setSearchParams({}, { replace: true });
     }
-    window.localStorage.removeItem(CASHIER_DRAFT_KEY);
   };
   doFullResetRef.current = doFullReset;
 
@@ -1125,10 +1038,14 @@ export default function Kasir() {
       await repairInventoryAnomalies();
 
       const updatedTx = await db.transactions.get(editingTxId);
-      toast.success(`Transaksi berhasil! ${updatedTx?.receiptNumber}`);
       setLastTransaction(updatedTx || null);
       setLastTxItems(itemRecords);
-      setReceiptOpen(true);
+      toast.success(`Transaksi berhasil! ${updatedTx?.receiptNumber}`, {
+        action: {
+          label: 'Lihat Struk',
+          onClick: () => setReceiptOpen(true),
+        },
+      });
     } else {
       const receiptNumber = `TX${Date.now()}`;
 
@@ -1189,10 +1106,14 @@ export default function Kasir() {
 
       await repairInventoryAnomalies();
 
-      toast.success(`Transaksi berhasil! ${receiptNumber}`);
       setLastTransaction({ ...txData, id: txId as number });
       setLastTxItems(itemRecords);
-      setReceiptOpen(true);
+      toast.success(`Transaksi berhasil! ${receiptNumber}`, {
+        action: {
+          label: 'Lihat Struk',
+          onClick: () => setReceiptOpen(true),
+        },
+      });
     }
 
     doFullReset();
@@ -2167,7 +2088,7 @@ export default function Kasir() {
       </Dialog>
 
       {/* Receipt Dialog */}
-      {lastTransaction && (
+      {lastTransaction && receiptOpen && (
       <Receipt
         open={receiptOpen}
         onClose={() => setReceiptOpen(false)}

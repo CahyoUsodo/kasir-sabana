@@ -160,6 +160,11 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
       : item.productName;
 
   useEffect(() => {
+    if (!open) {
+      setQueueNumber(null);
+      return;
+    }
+
     const fetchQueueNumber = async () => {
       if (!transaction.id || !transaction.date) {
         setQueueNumber(1);
@@ -199,7 +204,7 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
     };
 
     fetchQueueNumber();
-  }, [transaction.id, transaction.date]);
+  }, [open, transaction.id, transaction.date]);
 
   useEffect(() => {
     let cancelled = false;
