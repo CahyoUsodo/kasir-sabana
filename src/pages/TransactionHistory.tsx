@@ -36,6 +36,7 @@ export default function TransactionHistory() {
   const [restoreStock, setRestoreStock] = useState(true);
   const [filterStatus, setFilterStatus] = useState<'all' | 'completed' | 'open'>('all');
   const [filterCashier, setFilterCashier] = useState<string>('all');
+  const [filterPaymentMethod, setFilterPaymentMethod] = useState<string>('all');
 
   const transactions = useLiveQuery(() =>
     db.transactions.orderBy('date').reverse().toArray()
@@ -76,9 +77,24 @@ export default function TransactionHistory() {
   const getPaymentName = (pmId: number) =>
     paymentMethods?.find(pm => pm.id === pmId)?.name || 'Tunai';
 
+  const paymentFilterTabs = [
+    { value: 'all', label: 'Semua Pembayaran' },
+    ...((paymentMethods ?? [])
+      .filter((pm): pm is typeof pm & { id: number } => pm.id !== undefined)
+      .map((pm) => ({
+        value: String(pm.id),
+        label: pm.name,
+      }))),
+  ];
+
   const filtered = transactions?.filter(tx => {
     // Status filter
     if (filterStatus !== 'all' && tx.status !== filterStatus) return false;
+    // Payment method filter
+    if (filterPaymentMethod !== 'all') {
+      if (tx.status === 'open') return false;
+      if (String(tx.paymentMethodId) !== filterPaymentMethod) return false;
+    }
     // Cashier filter
     if (filterCashier !== 'all') {
       if (filterCashier === 'unknown') {
@@ -255,6 +271,23 @@ export default function TransactionHistory() {
         ))}
       </div>
 
+      {paymentFilterTabs.length > 1 && (
+        <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">
+          {paymentFilterTabs.map((tab) => (
+            <button
+              key={tab.value}
+              onClick={() => setFilterPaymentMethod(tab.value)}
+              className={cn(
+                'px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors',
+                filterPaymentMethod === tab.value ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Cashier filter (only when multi-user is on) */}
       {multiUserEnabled && users && users.length > 0 && (
         <div className="mb-4">
@@ -380,6 +413,12 @@ export default function TransactionHistory() {
                             <>
                               <span>•</span>
                               <span>{tx.serviceType === 'take_away' ? '🥡 Take Away' : '🍽️ Dine In'}</span>
+                            </>
+                          )}
+                          {tx.status !== 'open' && (
+                            <>
+                              <span>â€¢</span>
+                              <span>{getPaymentName(tx.paymentMethodId)}</span>
                             </>
                           )}
                           {tx.tableNumber && (
