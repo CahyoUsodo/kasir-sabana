@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type PaymentMethod, type Category, type Unit } from '@/lib/db';
 import { useState, useEffect, useRef } from 'react';
-import { Settings, Store, CreditCard, Tag, Download, Upload, Plus, Trash2, Edit2, Info, Truck, ChevronRight, Receipt, Palette, HardDrive, Camera, X, Ruler, Users as UsersIcon, ShieldCheck, LogOut, Smartphone, CheckCircle2, Globe, Share2, CloudUpload, CloudDownload, KeyRound, Warehouse, DollarSign } from 'lucide-react';
+import { Settings, Store, CreditCard, Tag, Download, Upload, Plus, Trash2, Edit2, Info, Truck, ChevronRight, Receipt, Palette, HardDrive, Camera, X, Ruler, Users as UsersIcon, ShieldCheck, LogOut, Smartphone, CheckCircle2, Globe, Share2, CloudUpload, CloudDownload, KeyRound, Warehouse, DollarSign, RefreshCw } from 'lucide-react';
 import ThemeColorPicker from '@/components/ThemeColorPicker';
 import { setThemeColor } from '@/hooks/use-theme-color';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -54,6 +54,7 @@ export default function Pengaturan() {
   // PWA install
   const { canInstall, isInstalled, isIOS, install } = usePWAInstall();
   const [installHelpOpen, setInstallHelpOpen] = useState(false);
+  const [isApplyingAppUpdate, setIsApplyingAppUpdate] = useState(false);
 
   // Multi-user activation
   const [activateOpen, setActivateOpen] = useState(false);
@@ -142,6 +143,28 @@ export default function Pengaturan() {
       setPinVerifyOpen(true);
     } else {
       action();
+    }
+  };
+
+  const handleAppRefresh = async () => {
+    const pwaWindow = window as Window & {
+      __applyPwaUpdate__?: () => Promise<void>;
+      __hasPendingPwaUpdate__?: boolean;
+    };
+
+    try {
+      setIsApplyingAppUpdate(true);
+
+      if (pwaWindow.__hasPendingPwaUpdate__ && pwaWindow.__applyPwaUpdate__) {
+        toast.info('Menerapkan versi aplikasi terbaru...');
+        await pwaWindow.__applyPwaUpdate__();
+        return;
+      }
+
+      toast.info('Memeriksa pembaruan aplikasi...');
+      window.location.reload();
+    } finally {
+      setIsApplyingAppUpdate(false);
     }
   };
 
@@ -1027,6 +1050,17 @@ export default function Pengaturan() {
       </Card>
 
       <div className="pb-2 text-center text-[11px] leading-relaxed text-muted-foreground">
+        <div className="mb-3">
+          <Button
+            variant="outline"
+            className="h-9 text-xs gap-2"
+            onClick={handleAppRefresh}
+            disabled={isApplyingAppUpdate}
+          >
+            <RefreshCw className={isApplyingAppUpdate ? 'w-3.5 h-3.5 animate-spin' : 'w-3.5 h-3.5'} />
+            {isApplyingAppUpdate ? 'Memperbarui Aplikasi...' : 'Perbarui Aplikasi'}
+          </Button>
+        </div>
         <p>Versi aplikasi {buildInfoText}</p>
         <p>Build {buildTimeText}</p>
       </div>

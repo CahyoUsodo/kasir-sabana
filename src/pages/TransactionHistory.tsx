@@ -417,7 +417,7 @@ export default function TransactionHistory() {
                           )}
                           {tx.status !== 'open' && (
                             <>
-                              <span>â€¢</span>
+                              <span>•</span>
                               <span>{getPaymentName(tx.paymentMethodId)}</span>
                             </>
                           )}
