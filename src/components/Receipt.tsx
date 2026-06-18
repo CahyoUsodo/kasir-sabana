@@ -5,7 +5,7 @@ import { Download, Share2, Printer, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { db, getConfiguredProductReceiptDetails, type Transaction, type StoreSettings, type TransactionItemRecord } from '@/lib/db';
+import { db, type Transaction, type StoreSettings, type TransactionItemRecord } from '@/lib/db';
 import { cn } from '@/lib/utils';
 
 interface ReceiptProps {
@@ -129,31 +129,13 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
   const [generating, setGenerating] = useState(false);
   const [queueNumber, setQueueNumber] = useState<number | null>(null);
   const [previewType, setPreviewType] = useState<'customer' | 'kitchen'>('customer');
-  const [resolvedItemDetails, setResolvedItemDetails] = useState<Record<string, string[]>>({});
 
   const printableItems = useMemo(
     () => items.filter(item => item.productId >= 0),
     [items]
   );
-  const printableItemsKey = useMemo(
-    () => JSON.stringify(
-      printableItems.map(item => ({
-        id: item.id,
-        transactionId: item.transactionId,
-        productId: item.productId,
-        stockKey: item.stockKey,
-        productName: item.productName,
-        productBaseName: item.productBaseName,
-        selectedOptionIds: item.selectedOptions?.map(option => option.optionId) ?? [],
-        receiptDetails: item.receiptDetails ?? [],
-      }))
-    ),
-    [printableItems]
-  );
-  const getItemKey = (item: TransactionItemRecord, index: number) =>
-    String(item.id ?? `${item.transactionId}-${item.stockKey ?? `${item.productId}-${index}`}`);
   const getItemDetails = (item: TransactionItemRecord, index: number) =>
-    resolvedItemDetails[getItemKey(item, index)] ?? item.receiptDetails ?? [];
+    item.selectedOptions?.map(option => option.optionName).filter(Boolean) ?? [];
   const getDisplayName = (item: TransactionItemRecord, index: number) =>
     getItemDetails(item, index).length > 0 && item.productBaseName
       ? item.productBaseName
@@ -205,42 +187,6 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
 
     fetchQueueNumber();
   }, [open, transaction.id, transaction.date]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const resolveItemDetails = async () => {
-      const entries = await Promise.all(printableItems.map(async (item, index) => {
-        const key = getItemKey(item, index);
-        if (item.receiptDetails && item.receiptDetails.length > 0) {
-          return [key, item.receiptDetails] as const;
-        }
-
-        const selectedOptionIds = item.selectedOptions?.map(option => option.optionId) ?? [];
-        if (selectedOptionIds.length === 0) {
-          return [key, []] as const;
-        }
-
-        const details = await getConfiguredProductReceiptDetails(item.productId, selectedOptionIds);
-        return [key, details] as const;
-      }));
-
-      if (!cancelled) {
-        setResolvedItemDetails(Object.fromEntries(entries));
-      }
-    };
-
-    if (open) {
-      void resolveItemDetails();
-    } else {
-      setResolvedItemDetails({});
-    }
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, printableItems, printableItemsKey]);
-
   const captureReceipt = async (): Promise<HTMLCanvasElement | null> => {
     if (!receiptRef.current) return null;
     setGenerating(true);
