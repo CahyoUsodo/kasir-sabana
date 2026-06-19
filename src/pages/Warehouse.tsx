@@ -95,6 +95,7 @@ export default function WarehousePage() {
   const [activeTab, setActiveTab] = useState<'stok' | 'resep' | 'daily'>('stok');
   const [stockFilter, setStockFilter] = useState<'all' | 'manual' | 'cashier' | 'prep' | 'output'>('all');
   const [stockSearch, setStockSearch] = useState('');
+  const [recipeSearch, setRecipeSearch] = useState('');
   
   // Item Dialog states
   const [itemDialog, setItemDialog] = useState(false);
@@ -600,15 +601,24 @@ export default function WarehousePage() {
     }).sort(compareWarehouseItems);
   }, [warehouseItems, stockFilter, stockSearch, getItemMeta, compareWarehouseItems]);
 
-  const sortedRecipeProducts = useMemo(() => {
+  const filteredRecipeProducts = useMemo(() => {
+    const normalizedSearch = recipeSearch.trim().toLowerCase();
     return (cashierProducts ?? [])
-      .filter(product => (recipes?.some(recipe => recipe.productId === product.id) ?? false))
+      .filter(product => {
+        const hasRecipe = recipes?.some(recipe => recipe.productId === product.id) ?? false;
+        if (!hasRecipe) return false;
+        if (!normalizedSearch) return true;
+        return (
+          product.name.toLowerCase().includes(normalizedSearch) ||
+          product.sku.toLowerCase().includes(normalizedSearch)
+        );
+      })
       .sort((a, b) => {
         const rankDiff = getRecipeProductRank(a) - getRecipeProductRank(b);
         if (rankDiff !== 0) return rankDiff;
         return normalizeText(a.name).localeCompare(normalizeText(b.name), 'id');
       });
-  }, [cashierProducts, recipes, getRecipeProductRank, normalizeText]);
+  }, [cashierProducts, recipes, recipeSearch, getRecipeProductRank, normalizeText]);
 
   useEffect(() => {
     const queryTab = searchParams.get('tab');
@@ -827,8 +837,18 @@ export default function WarehousePage() {
             </Button>
           </div>
 
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              value={recipeSearch}
+              onChange={e => setRecipeSearch(e.target.value)}
+              placeholder="Cari produk resep atau SKU..."
+              className="pl-9 h-10"
+            />
+          </div>
+
           <div className="space-y-4">
-            {sortedRecipeProducts.map(prod => {
+            {filteredRecipeProducts.map(prod => {
               const prodRecipes = (recipes?.filter(r => r.productId === prod.id) || []).sort((a, b) => {
                 const itemA = warehouseItems?.find(wi => wi.id === a.warehouseItemId);
                 const itemB = warehouseItems?.find(wi => wi.id === b.warehouseItemId);
@@ -878,6 +898,11 @@ export default function WarehousePage() {
             {(!recipes || recipes.length === 0) && (
               <div className="py-8 text-center text-xs text-muted-foreground">
                 Belum ada produk yang dihubungkan dengan resep stok gudang.
+              </div>
+            )}
+            {recipes && recipes.length > 0 && filteredRecipeProducts.length === 0 && (
+              <div className="py-8 text-center text-xs text-muted-foreground">
+                Tidak ada produk resep yang cocok dengan pencarian.
               </div>
             )}
           </div>

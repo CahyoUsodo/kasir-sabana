@@ -1192,7 +1192,7 @@ export async function adjustWarehouseStock(productId: number, qtyDelta: number) 
     const item = await db.warehouseItems.get(warehouseItemId);
     if (item) {
       await db.warehouseItems.update(warehouseItemId, {
-        stock: Math.max(0, item.stock - qtyDelta),
+        stock: item.stock - qtyDelta,
         updatedAt: new Date()
       });
     }
@@ -1202,7 +1202,7 @@ export async function adjustWarehouseStock(productId: number, qtyDelta: number) 
       const item = await db.warehouseItems.get(recipe.warehouseItemId);
       if (item) {
         await db.warehouseItems.update(recipe.warehouseItemId, {
-          stock: Math.max(0, item.stock - (recipe.quantity * qtyDelta)),
+          stock: item.stock - (recipe.quantity * qtyDelta),
           updatedAt: new Date()
         });
       }
@@ -1234,7 +1234,7 @@ export async function adjustConfiguredStock(
     const freshProduct = await db.products.get(productId);
     if (freshProduct) {
       await db.products.update(productId, {
-        stock: Math.max(0, freshProduct.stock - qtyDelta),
+        stock: freshProduct.stock - qtyDelta,
         updatedAt: new Date()
       });
     }
@@ -1248,7 +1248,7 @@ export async function adjustConfiguredStock(
     const item = await db.warehouseItems.get(Number(warehouseItemId));
     if (item) {
       await db.warehouseItems.update(Number(warehouseItemId), {
-        stock: Math.max(0, item.stock - (quantity * qtyDelta)),
+        stock: item.stock - (quantity * qtyDelta),
         updatedAt: new Date()
       });
     }
@@ -1264,15 +1264,6 @@ export async function repairInventoryAnomalies() {
   const warehouseItems = await db.warehouseItems.where('isDeleted').equals(0).toArray();
   const recipes = await db.productRecipes.toArray();
   const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-
-  for (const item of warehouseItems) {
-    if (item.stock < 0) {
-      await db.warehouseItems.update(item.id!, {
-        stock: 0,
-        updatedAt: new Date()
-      });
-    }
-  }
 
   const refreshedWarehouseItems = await db.warehouseItems.where('isDeleted').equals(0).toArray();
   const visibleWarehouseItems = refreshedWarehouseItems.filter(item => item.isCashierVisible === 1);
@@ -1293,7 +1284,7 @@ export async function repairInventoryAnomalies() {
 
     if (productRecipes.length > 0 || hasOptionRecipes) {
       const candidates = buildOptionSelectionCandidatesForProduct(product.id, optionGroups, options);
-      let computedStock = 0;
+      let computedStock = Number.NEGATIVE_INFINITY;
 
       for (const selectedOptionIds of candidates) {
         const usage = new Map<number, number>();
@@ -1308,7 +1299,7 @@ export async function repairInventoryAnomalies() {
 
         let availableForCandidate = Infinity;
         if (usage.size === 0) {
-          availableForCandidate = Math.max(0, product.stock);
+          availableForCandidate = product.stock;
         } else {
           for (const [warehouseItemId, quantity] of usage.entries()) {
             const warehouseItem = refreshedWarehouseItems.find(item => item.id === warehouseItemId);
@@ -1317,7 +1308,7 @@ export async function repairInventoryAnomalies() {
               break;
             }
             const isResetToday = warehouseItem.isDailyReset === 1 && warehouseItem.lastPreparedDate !== todayStr;
-            const effectiveStock = isResetToday ? 0 : Math.max(0, warehouseItem.stock);
+            const effectiveStock = isResetToday ? 0 : warehouseItem.stock;
             const available = Math.floor(effectiveStock / quantity);
             if (available < availableForCandidate) {
               availableForCandidate = available;
@@ -1325,7 +1316,7 @@ export async function repairInventoryAnomalies() {
           }
         }
 
-        computedStock = Math.max(computedStock, availableForCandidate === Infinity ? 0 : Math.max(0, availableForCandidate));
+        computedStock = Math.max(computedStock, availableForCandidate === Infinity ? 0 : availableForCandidate);
       }
 
       if (product.stock !== computedStock) {
@@ -1337,25 +1328,7 @@ export async function repairInventoryAnomalies() {
       continue;
     }
 
-    if (product.stock < 0) {
-      const productName = normalize(product.name);
-      const matchedWarehouseItem = visibleWarehouseItems.find(item => {
-        const itemName = normalize(item.name);
-        return itemName === productName || itemName.includes(productName) || productName.includes(itemName);
-      });
-
-      if (matchedWarehouseItem) {
-        await db.products.update(product.id!, {
-          stock: Math.max(0, matchedWarehouseItem.stock),
-          updatedAt: new Date()
-        });
-      } else {
-        await db.products.update(product.id!, {
-          stock: 0,
-          updatedAt: new Date()
-        });
-      }
-    }
+    if (product.stock < 0) continue;
   }
 }
 

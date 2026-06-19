@@ -324,9 +324,6 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
           lines.push(`Tipe: ${typeLabel}\n`);
         }
         if (transaction.tableNumber) lines.push(`Meja: ${transaction.tableNumber}\n`);
-        if (transaction.remarks) {
-          wrapText(`Catatan: ${transaction.remarks}`, 32).forEach(line => lines.push(line + '\n'));
-        }
 
         // Print Queue Number
         if (queueNumber !== null) {
@@ -345,8 +342,7 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
           const detailLines = getItemDetails(item, i);
           lines.push(`${getDisplayName(item, i)}\n`);
           detailLines.forEach(detail => lines.push(`  - ${detail}\n`));
-          if (item.notes) lines.push(`  ${item.notes}\n`);
-          
+
           const qtyPrice = `  ${item.quantity} x Rp ${item.price.toLocaleString('id-ID')}`;
           const subtotalStr = `Rp ${item.subtotal.toLocaleString('id-ID')}`;
           lines.push(formatLine(qtyPrice, subtotalStr) + '\n');
@@ -570,12 +566,6 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
                   <span>Meja: {transaction.tableNumber}</span>
                 </div>
               )}
-              {transaction.remarks && (
-                <div className="text-[10px]">
-                  <span>Catatan: {transaction.remarks}</span>
-                </div>
-              )}
-
               {queueNumber !== null && (
                 <div className="text-center my-2 py-1 bg-gray-50 rounded border border-dashed border-gray-300">
                   <p className="text-[8px] text-gray-500 uppercase tracking-wider font-semibold">Your Queue Number</p>
@@ -596,7 +586,6 @@ export default function Receipt({ open, onClose, transaction, items, storeSettin
                       ))}
                     </div>
                   )}
-                  {item.notes && <p className="text-[9px] text-gray-500 italic">  {item.notes}</p>}
                   <div className="flex justify-between text-[10px]">
                     <span>{item.quantity} x {rp(item.price)}</span>
                     <span>{rp(item.subtotal)}</span>

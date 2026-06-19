@@ -308,7 +308,7 @@ export default function Kasir() {
         .filter(item => item.stockKey === stockKey && item.stockKey !== excludedStockKey)
         .reduce((sum, item) => sum + item.qty, 0);
 
-      return Math.max(0, product.stock - reservedQty);
+      return product.stock - reservedQty;
     }
 
     const reservedUsage = getReservedWarehouseUsageFromCart(cartItems, excludedStockKey);
@@ -320,7 +320,7 @@ export default function Kasir() {
       const isResetToday = whItem.isDailyReset === 1 && whItem.lastPreparedDate !== todayStr;
       const effectiveStock = isResetToday ? 0 : whItem.stock;
       const reserved = reservedUsage.get(warehouseItemId) || 0;
-      const available = Math.floor(Math.max(0, effectiveStock - reserved) / quantity);
+      const available = Math.floor((effectiveStock - reserved) / quantity);
       if (available < minStock) {
         minStock = available;
       }
@@ -371,7 +371,7 @@ export default function Kasir() {
     };
 
     walk(0, {});
-    return Math.max(0, ...availability);
+    return availability.length > 0 ? Math.max(...availability) : 0;
   };
 
   const getSelectionWithOption = (groupId: number, optionId: number, maxSelect: number) => {
@@ -770,18 +770,8 @@ export default function Kasir() {
         stock: availableStock,
       };
       const existing = prev.find(c => c.stockKey === stockKey);
-      const origQty = originalQuantities[stockKey] || 0;
-      const allowedStock = availableStock + origQty;
       if (existing) {
-        if (existing.qty >= allowedStock) {
-          toast.error('Stok tidak cukup');
-          return prev;
-        }
         return prev.map(c => c.stockKey === stockKey ? { ...c, qty: c.qty + 1 } : c);
-      }
-      if (allowedStock <= 0) {
-        toast.error('Stok tidak cukup');
-        return prev;
       }
       return [...prev, {
         product: configuredProduct,
@@ -847,11 +837,8 @@ export default function Kasir() {
       if (c.stockKey !== stockKey) return c;
       const newQty = c.qty + delta;
       if (newQty <= 0) return c;
-      const origQty = originalQuantities[stockKey] || 0;
       const selection = buildSelectionFromSnapshots(c.selectedOptions);
       const availableStock = getAvailableStockForSelectionSync(c.product, selection, prev, stockKey);
-      const allowedStock = availableStock + origQty;
-      if (newQty > allowedStock) { toast.error('Stok tidak cukup'); return c; }
       return { ...c, qty: newQty, product: { ...c.product, stock: availableStock } };
     }));
   };
@@ -1205,7 +1192,7 @@ export default function Kasir() {
           <div className="text-center py-12">
             <p className="text-sm text-muted-foreground">
               {products && products.length > 0
-                ? 'Semua produk stoknya habis. Tambah stok dulu di menu Stok Masuk.'
+                ? 'Tidak ada produk yang cocok dengan pencarian atau kategori ini.'
                 : 'Belum ada produk. Tambah produk dulu di menu Produk.'}
             </p>
           </div>
@@ -1218,15 +1205,15 @@ export default function Kasir() {
               <Card
                 key={p.id}
                 className={cn(
-                  "border-0 shadow-sm transition-all active:scale-[0.98]",
+                  "border-0 shadow-sm transition-all active:scale-[0.98] cursor-pointer",
                   isOutOfStock
-                    ? "cursor-pointer bg-muted/60 grayscale hover:shadow-sm"
-                    : "cursor-pointer hover:shadow-md"
+                    ? "bg-muted/30 hover:shadow-sm"
+                    : "hover:shadow-md"
                 )}
-                onClick={() => isOutOfStock ? handleUnavailableProductClick(p) : addToCart(p)}
+                onClick={() => addToCart(p)}
               >
                 <CardContent className="p-0 relative">
-                  {isOutOfStock && (
+                  {false && (
                     <div className="absolute inset-x-2 top-2 z-10 rounded-full bg-muted-foreground/85 px-2 py-1 text-center text-[10px] font-semibold text-background">
                       Stok habis • buka produk
                     </div>
@@ -1247,7 +1234,7 @@ export default function Kasir() {
                       </p>
                     )}
                     <p className={cn("text-[10px] mt-0.5", isOutOfStock ? "text-destructive font-semibold" : "text-muted-foreground")}>
-                      {isOutOfStock ? `Stok habis` : `Stok: ${p.stock} ${p.unit}`}
+                      {`Stok: ${p.stock} ${p.unit}`}
                     </p>
                   </div>
                 </CardContent>
@@ -1718,12 +1705,11 @@ export default function Kasir() {
                           <button
                             key={option.id}
                             type="button"
-                            disabled={outOfStock && !active}
                             onClick={() => toggleOptionSelection(group.id!, option.id!, group.maxSelect)}
                             className={cn(
                               'text-left p-3 rounded-xl border transition-colors min-h-[68px]',
                               active ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-muted/30 text-foreground',
-                              outOfStock && !active && 'opacity-55 cursor-not-allowed'
+                              outOfStock && !active && 'border-destructive/40 bg-destructive/5'
                             )}
                           >
                             <span className="block text-sm font-semibold leading-tight">{option.name}</span>
@@ -1740,7 +1726,7 @@ export default function Kasir() {
                               'block text-[11px] mt-1 font-medium',
                               outOfStock ? 'text-destructive' : 'text-emerald-600'
                             )}>
-                              {outOfStock ? 'Stok habis' : `Stok tersedia: ${optionStock} ${optionProduct.unit}`}
+                              {outOfStock ? `Stok: ${optionStock} ${optionProduct.unit} • tetap bisa dipilih` : `Stok tersedia: ${optionStock} ${optionProduct.unit}`}
                             </span>
                           </button>
                         );

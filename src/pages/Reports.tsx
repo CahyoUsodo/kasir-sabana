@@ -22,10 +22,13 @@ export default function Laporan() {
   }
 
   const { can } = useAuth();
-  const [period, setPeriod] = useState<'7' | '30' | 'custom'>('7');
+  const [period, setPeriod] = useState<'today' | '7' | '30' | 'custom'>('today');
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
-  const days = period === 'custom' ? 0 : Number(period);
+  const days = period === 'custom' || period === 'today' ? 0 : Number(period);
+  const getPresetStartDate = () => period === 'today'
+    ? startOfDay(new Date())
+    : startOfDay(subDays(new Date(), days));
 
   const transactions = useLiveQuery(async () => {
     if (period === 'custom') {
@@ -38,7 +41,7 @@ export default function Laporan() {
       }
       return []; // Return none if custom but no date selected to avoid pulling everything unnecessarily, or we could fetch all. Fetching all is bad for perf. Let's return none if no date filter.
     } else {
-      const since = startOfDay(subDays(new Date(), days));
+      const since = getPresetStartDate();
       return db.transactions.where('date').aboveOrEqual(since).toArray();
     }
   }, [days, period, dateFrom, dateTo]);
@@ -67,7 +70,7 @@ export default function Laporan() {
       return [];
     }
 
-    const since = startOfDay(subDays(new Date(), days));
+    const since = getPresetStartDate();
     return db.dailyExpenses.where('date').aboveOrEqual(since).toArray();
   }, [days, period, dateFrom, dateTo]);
   const warehouseUsageLogs = useLiveQuery(async () => {
@@ -82,7 +85,7 @@ export default function Laporan() {
       return [];
     }
 
-    const since = startOfDay(subDays(new Date(), days));
+    const since = getPresetStartDate();
     return db.warehouseUsageLogs.where('date').aboveOrEqual(since).toArray();
   }, [days, period, dateFrom, dateTo]);
 
@@ -306,6 +309,9 @@ export default function Laporan() {
           current = addDays(current, 1);
         }
       }
+    } else if (period === 'today') {
+      const d = format(new Date(), 'dd/MM');
+      map[d] = 0;
     } else {
       for (let i = days - 1; i >= 0; i--) {
         const d = format(subDays(new Date(), i), 'dd/MM');
@@ -424,7 +430,7 @@ export default function Laporan() {
       return false;
     }
 
-    return date >= startOfDay(subDays(new Date(), days));
+    return date >= getPresetStartDate();
   };
 
   const stockReport = (() => {
@@ -540,6 +546,7 @@ export default function Laporan() {
 
     // --- Period label ---
     let periodLabel = '';
+    if (period === 'today') periodLabel = 'Hari Ini';
     if (period === '7') periodLabel = '7 Hari Terakhir';
     else if (period === '30') periodLabel = '30 Hari Terakhir';
     else if (period === 'custom') {
@@ -1320,13 +1327,14 @@ export default function Laporan() {
       </div>
 
       <Tabs value={period} onValueChange={v => {
-        setPeriod(v as '7' | '30' | 'custom');
+        setPeriod(v as 'today' | '7' | '30' | 'custom');
         if (v !== 'custom') {
           setDateFrom(undefined);
           setDateTo(undefined);
         }
       }}>
         <TabsList className="w-full">
+          <TabsTrigger value="today" className="flex-1">Hari Ini</TabsTrigger>
           <TabsTrigger value="7" className="flex-1">7 Hari</TabsTrigger>
           <TabsTrigger value="30" className="flex-1">30 Hari</TabsTrigger>
           <TabsTrigger value="custom" className="flex-1">Pilih Tanggal</TabsTrigger>
