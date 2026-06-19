@@ -1709,7 +1709,7 @@ export default function Kasir() {
                             className={cn(
                               'text-left p-3 rounded-xl border transition-colors min-h-[68px]',
                               active ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-muted/30 text-foreground',
-                              outOfStock && !active && 'border-destructive/40 bg-destructive/5'
+                              outOfStock && !active && 'border-amber-300 bg-amber-50 text-foreground'
                             )}
                           >
                             <span className="block text-sm font-semibold leading-tight">{option.name}</span>
@@ -1724,7 +1724,7 @@ export default function Kasir() {
                             </span>
                             <span className={cn(
                               'block text-[11px] mt-1 font-medium',
-                              outOfStock ? 'text-destructive' : 'text-emerald-600'
+                              outOfStock ? 'text-amber-700' : 'text-emerald-600'
                             )}>
                               {outOfStock ? `Stok: ${optionStock} ${optionProduct.unit} • tetap bisa dipilih` : `Stok tersedia: ${optionStock} ${optionProduct.unit}`}
                             </span>
