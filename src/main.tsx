@@ -10,7 +10,7 @@ declare global {
   }
 }
 
-if (import.meta.env.PROD) {
+if (import.meta.env.PROD && import.meta.env.MODE !== "android") {
   const updateSW = registerSW({
     immediate: true,
     onNeedRefresh() {

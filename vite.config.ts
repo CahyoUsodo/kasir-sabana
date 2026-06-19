@@ -21,7 +21,10 @@ const getGitCommitHash = () => {
 const appCommitHash = getGitCommitHash();
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode }) => {
+  const isAndroidBuild = mode === "android";
+
+  return ({
   server: {
     host: "::",
     port: 8080,
@@ -33,6 +36,7 @@ export default defineConfig(({ mode }) => ({
     react(),
     mode === "development" && componentTagger(),
     VitePWA({
+      disable: isAndroidBuild,
       registerType: "autoUpdate",
       includeAssets: ["favicon.ico", "apple-touch-icon.png"],
       manifest: {
@@ -95,4 +99,4 @@ export default defineConfig(({ mode }) => ({
     __APP_BUILD_TIME__: JSON.stringify(appBuildTime),
     __APP_COMMIT_HASH__: JSON.stringify(appCommitHash),
   },
-}));
+})});

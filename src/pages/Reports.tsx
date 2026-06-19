@@ -180,6 +180,7 @@ export default function Laporan() {
   })();
 
   const hasOtherPaymentMethods = paymentSummary.other.txCount > 0 || Math.abs(paymentSummary.other.net) > 0;
+  const cashAfterOperationalExpenses = paymentSummary.cash.net - totalOperationalExpenses;
   const summaryTableRows = [
     {
       label: 'Transaksi',
@@ -225,10 +226,17 @@ export default function Laporan() {
     },
     {
       label: 'Pengeluaran Operasional',
-      cash: '-',
+      cash: totalOperationalExpenses > 0 ? `-${rp(totalOperationalExpenses)}` : 'Rp 0',
       qris: '-',
       total: totalOperationalExpenses > 0 ? `-${rp(totalOperationalExpenses)}` : 'Rp 0',
       tone: 'danger',
+    },
+    {
+      label: 'Kas Tunai Setelah Operasional',
+      cash: rp(cashAfterOperationalExpenses),
+      qris: '-',
+      total: rp(cashAfterOperationalExpenses),
+      tone: 'cashStrong',
     },
     {
       label: 'Laba Bersih',
@@ -592,6 +600,10 @@ export default function Laporan() {
     const currencyFormat = 'Rp #,##0';
     // Percentage format
     const percentFormat = '0.0%';
+    const applyWrappedNameCell = (row, cellAddress: string, text: string, charsPerLine = 58) => {
+      row.getCell(cellAddress).alignment = { wrapText: true, vertical: 'top' };
+      row.height = Math.max(row.height ?? 18, Math.ceil(text.length / charsPerLine) * 18);
+    };
     // ============================================
     // SHEET 1: Ringkasan
     // ============================================
@@ -671,9 +683,11 @@ export default function Laporan() {
       { label: 'Pendapatan Kotor', val: totalRevenue, fmt: currencyFormat },
       { label: 'Diskon', val: totalDiscount, fmt: currencyFormat },
       { label: 'Penjualan Bersih', val: netSales, fmt: currencyFormat },
+      { label: 'Penjualan Tunai Bersih', val: paymentSummary.cash.net, fmt: currencyFormat },
       { label: 'HPP (Modal)', val: totalHpp, fmt: currencyFormat },
       { label: 'Profit (Laba Kotor)', val: grossProfit, fmt: currencyFormat },
       { label: 'Pengeluaran Operasional', val: totalOperationalExpenses, fmt: currencyFormat },
+      { label: 'Kas Tunai Setelah Operasional', val: cashAfterOperationalExpenses, fmt: currencyFormat },
       { label: 'Laba Bersih', val: netProfitAfterExpenses, fmt: currencyFormat },
       { label: 'Margin', val: marginPercent / 100, fmt: percentFormat }
     ];
@@ -731,7 +745,7 @@ export default function Laporan() {
           wsRingkasan.getCell(`${col}${rRow}`).fill = subtotalFill;
         });
       }
-      if (c.label === 'Penjualan Bersih' || c.label === 'Laba Bersih') {
+      if (c.label === 'Penjualan Bersih' || c.label === 'Kas Tunai Setelah Operasional' || c.label === 'Laba Bersih') {
         ['A','D'].forEach(col => {
           wsRingkasan.getCell(`${col}${rRow}`).font = { bold: true, color: { argb: 'FFB42829' } };
           wsRingkasan.getCell(`${col}${rRow}`).fill = emphasizedFill;
@@ -944,7 +958,7 @@ export default function Laporan() {
     const wsProduk = wb.addWorksheet('Produk Terlaris', { views: [{ state: 'frozen', ySplit: 1 }] });
     wsProduk.columns = [
       { header: 'No', key: 'no', width: 6 },
-      { header: 'Nama Produk', key: 'name', width: 40 },
+      { header: 'Nama Produk', key: 'name', width: 72 },
       { header: 'Jumlah Terjual', key: 'qty', width: 16 },
       { header: 'Satuan', key: 'unit', width: 12 },
       { header: 'Total Pendapatan Kotor', key: 'gross', width: 25, style: { numFmt: currencyFormat } },
@@ -978,6 +992,7 @@ export default function Laporan() {
         margin: margin
       });
       row.alignment = { vertical: 'top' };
+      applyWrappedNameCell(row, 'B', p.name);
       row.eachCell(cell => { cell.border = cellBorder; });
     });
 
@@ -1021,7 +1036,7 @@ export default function Laporan() {
     const wsHarian = wb.addWorksheet('Detail Penjualan Harian', { views: [{ state: 'frozen', ySplit: 1 }] });
     wsHarian.columns = [
       { header: 'Tanggal', key: 'date', width: 18 },
-      { header: 'Nama Produk', key: 'name', width: 40 },
+      { header: 'Nama Produk', key: 'name', width: 72 },
       { header: 'Jumlah Terjual', key: 'qty', width: 16 },
       { header: 'Satuan', key: 'unit', width: 12 },
       { header: 'Total Pendapatan Kotor', key: 'gross', width: 25, style: { numFmt: currencyFormat } },
@@ -1109,6 +1124,7 @@ export default function Laporan() {
           profit: p.profit,
         });
         row.alignment = { vertical: 'top' };
+        applyWrappedNameCell(row, 'B', p.name);
         row.eachCell(cell => { cell.border = cellBorder; });
 
         dayQty += p.qty;
@@ -1399,7 +1415,7 @@ export default function Laporan() {
                 Ringkasan Pembayaran
               </CardTitle>
               <p className="mt-1 text-xs text-muted-foreground">
-                Cash dan QRIS dipisah agar lebih cepat dibaca. Pengeluaran operasional dan laba bersih tetap ditampilkan pada total keseluruhan.
+                Cash dan QRIS dipisah agar cepat dibaca. Kas tunai setelah operasional = penjualan tunai bersih dikurangi pengeluaran operasional.
               </p>
             </div>
             {hasOtherPaymentMethods && (
@@ -1422,12 +1438,12 @@ export default function Laporan() {
               {summaryTableRows.map((row) => {
                 const rowToneClass = row.tone === 'danger'
                   ? 'text-destructive'
-                  : row.tone === 'success' || row.tone === 'successStrong'
+                  : row.tone === 'success' || row.tone === 'successStrong' || row.tone === 'cashStrong'
                     ? 'text-success'
                     : 'text-foreground';
                 const rowWeightClass = row.tone === 'neutral'
                   ? 'font-semibold'
-                  : row.tone === 'defaultStrong' || row.tone === 'successStrong'
+                  : row.tone === 'defaultStrong' || row.tone === 'successStrong' || row.tone === 'cashStrong'
                     ? 'font-bold'
                     : 'font-medium';
 
@@ -1437,7 +1453,7 @@ export default function Laporan() {
                       className={cn(
                         'border-b border-r border-border px-4 py-3',
                         rowWeightClass,
-                        (row.label === 'Laba Bersih' || row.label === 'Margin') && 'bg-success/5',
+                        (row.label === 'Kas Tunai Setelah Operasional' || row.label === 'Laba Bersih' || row.label === 'Margin') && 'bg-success/5',
                       )}
                     >
                       {row.label}
@@ -1453,7 +1469,7 @@ export default function Laporan() {
                         'border-b border-border px-4 py-3 text-right tabular-nums',
                         rowToneClass,
                         rowWeightClass,
-                        (row.label === 'Laba Bersih' || row.label === 'Margin') && 'bg-success/5',
+                        (row.label === 'Kas Tunai Setelah Operasional' || row.label === 'Laba Bersih' || row.label === 'Margin') && 'bg-success/5',
                       )}
                     >
                       {row.total}
