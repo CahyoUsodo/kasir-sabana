@@ -601,8 +601,20 @@ export default function Laporan() {
     // Percentage format
     const percentFormat = '0.0%';
     const applyWrappedNameCell = (row, cellAddress: string, text: string, charsPerLine = 58) => {
-      row.getCell(cellAddress).alignment = { wrapText: true, vertical: 'top' };
+      row.getCell(cellAddress).alignment = { wrapText: true, vertical: 'middle' };
       row.height = Math.max(row.height ?? 18, Math.ceil(text.length / charsPerLine) * 18);
+    };
+    const applyMiddleAlignment = () => {
+      wb.eachSheet((sheet) => {
+        sheet.eachRow((row) => {
+          row.eachCell({ includeEmpty: true }, (cell) => {
+            cell.alignment = {
+              ...cell.alignment,
+              vertical: 'middle',
+            };
+          });
+        });
+      });
     };
     // ============================================
     // SHEET 1: Ringkasan
@@ -683,11 +695,9 @@ export default function Laporan() {
       { label: 'Pendapatan Kotor', val: totalRevenue, fmt: currencyFormat },
       { label: 'Diskon', val: totalDiscount, fmt: currencyFormat },
       { label: 'Penjualan Bersih', val: netSales, fmt: currencyFormat },
-      { label: 'Penjualan Tunai Bersih', val: paymentSummary.cash.net, fmt: currencyFormat },
       { label: 'HPP (Modal)', val: totalHpp, fmt: currencyFormat },
       { label: 'Profit (Laba Kotor)', val: grossProfit, fmt: currencyFormat },
       { label: 'Pengeluaran Operasional', val: totalOperationalExpenses, fmt: currencyFormat },
-      { label: 'Kas Tunai Setelah Operasional', val: cashAfterOperationalExpenses, fmt: currencyFormat },
       { label: 'Laba Bersih', val: netProfitAfterExpenses, fmt: currencyFormat },
       { label: 'Margin', val: marginPercent / 100, fmt: percentFormat }
     ];
@@ -745,7 +755,7 @@ export default function Laporan() {
           wsRingkasan.getCell(`${col}${rRow}`).fill = subtotalFill;
         });
       }
-      if (c.label === 'Penjualan Bersih' || c.label === 'Kas Tunai Setelah Operasional' || c.label === 'Laba Bersih') {
+      if (c.label === 'Penjualan Bersih' || c.label === 'Laba Bersih') {
         ['A','D'].forEach(col => {
           wsRingkasan.getCell(`${col}${rRow}`).font = { bold: true, color: { argb: 'FFB42829' } };
           wsRingkasan.getCell(`${col}${rRow}`).fill = emphasizedFill;
@@ -880,6 +890,55 @@ export default function Laporan() {
       wsRingkasan.getCell(`J${i}`).border = cellBorder;
       ['K','L'].forEach(col => wsRingkasan.getCell(`${col}${i}`).border = { top: cellBorder.top, bottom: cellBorder.bottom, left: col==='K'?cellBorder.left:undefined, right: col==='L'?cellBorder.right:undefined });
       ['M','N'].forEach(col => wsRingkasan.getCell(`${col}${i}`).border = { top: cellBorder.top, bottom: cellBorder.bottom, left: col==='M'?cellBorder.left:undefined, right: col==='N'?cellBorder.right:undefined });
+    }
+
+    // Kas Tunai Table
+    const cashHeaderRow = serviceRow + 2;
+    wsRingkasan.mergeCells(`H${cashHeaderRow}:N${cashHeaderRow}`);
+    wsRingkasan.getCell(`H${cashHeaderRow}`).value = 'KAS TUNAI';
+    wsRingkasan.getCell(`H${cashHeaderRow}`).style = headerStyle;
+
+    const cashLabelRow = cashHeaderRow + 1;
+    wsRingkasan.mergeCells(`H${cashLabelRow}:K${cashLabelRow}`);
+    wsRingkasan.getCell(`H${cashLabelRow}`).value = 'Keterangan';
+    wsRingkasan.mergeCells(`L${cashLabelRow}:N${cashLabelRow}`);
+    wsRingkasan.getCell(`L${cashLabelRow}`).value = 'Jumlah';
+    ['H','L'].forEach(c => {
+      wsRingkasan.getCell(`${c}${cashLabelRow}`).style = headerStyle;
+    });
+
+    const cashRows = [
+      { label: 'Tunai Bersih', value: paymentSummary.cash.net, emphasized: false },
+      { label: 'Pengeluaran Operasional', value: totalOperationalExpenses, emphasized: false },
+      { label: 'Kas Tunai Setelah Operasional', value: cashAfterOperationalExpenses, emphasized: true },
+    ];
+
+    cashRows.forEach((row, index) => {
+      const rowNumber = cashLabelRow + index + 1;
+      wsRingkasan.mergeCells(`H${rowNumber}:K${rowNumber}`);
+      wsRingkasan.getCell(`H${rowNumber}`).value = row.label;
+      wsRingkasan.mergeCells(`L${rowNumber}:N${rowNumber}`);
+      wsRingkasan.getCell(`L${rowNumber}`).value = row.value;
+      wsRingkasan.getCell(`L${rowNumber}`).numFmt = currencyFormat;
+      wsRingkasan.getCell(`L${rowNumber}`).alignment = { horizontal: 'center', vertical: 'middle' };
+
+      if (index % 2 === 0) {
+        ['H','L'].forEach(col => {
+          wsRingkasan.getCell(`${col}${rowNumber}`).fill = subtotalFill;
+        });
+      }
+
+      if (row.emphasized) {
+        ['H','L'].forEach(col => {
+          wsRingkasan.getCell(`${col}${rowNumber}`).font = { bold: true, color: { argb: 'FFB42829' } };
+          wsRingkasan.getCell(`${col}${rowNumber}`).fill = emphasizedFill;
+        });
+      }
+    });
+
+    for (let i = cashLabelRow; i <= cashLabelRow + cashRows.length; i++) {
+      ['H','I','J','K'].forEach(col => wsRingkasan.getCell(`${col}${i}`).border = { top: cellBorder.top, bottom: cellBorder.bottom, left: col==='H'?cellBorder.left:undefined, right: col==='K'?cellBorder.right:undefined });
+      ['L','M','N'].forEach(col => wsRingkasan.getCell(`${col}${i}`).border = { top: cellBorder.top, bottom: cellBorder.bottom, left: col==='L'?cellBorder.left:undefined, right: col==='N'?cellBorder.right:undefined });
     }
 
     // ============================================
@@ -1317,6 +1376,8 @@ export default function Laporan() {
     // ============================================
     // Trigger download
     // ============================================
+    applyMiddleAlignment();
+
     const fileName = `Laporan_${storeName.replace(/\s+/g, '_')}_${format(new Date(), 'yyyyMMdd_HHmm')}.xlsx`;
     const buffer = await wb.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
