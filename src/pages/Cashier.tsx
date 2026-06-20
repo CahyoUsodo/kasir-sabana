@@ -929,6 +929,13 @@ export default function Kasir() {
 
   // === Checkout ===
 
+  const openCheckoutPayment = () => {
+    setCheckoutOpen(true);
+    setPaymentMethodId('');
+    setPaymentAmount('0');
+    setIsQuickAdding(false);
+  };
+
   const handleCheckout = async () => {
     if (isCheckoutSubmitting) return;
     if (!paymentMethodId || paidAmount < total) return;
@@ -1441,7 +1448,7 @@ export default function Kasir() {
               <div className="flex gap-2">
                 <Button
                   className="w-full h-12 text-sm font-semibold"
-                  onClick={() => { setCheckoutOpen(true); setPaymentMethodId(paymentMethods?.[0]?.id?.toString() ?? ''); setPaymentAmount(total.toString()); setIsQuickAdding(false); }}
+                  onClick={openCheckoutPayment}
                 >
                   <CreditCard className="w-4 h-4 mr-2" />
                   Bayar
@@ -1659,7 +1666,7 @@ export default function Kasir() {
               <div className="flex gap-2">
                 <Button
                   className="w-full h-12 text-sm font-semibold"
-                  onClick={() => { setCheckoutOpen(true); setPaymentMethodId(paymentMethods?.[0]?.id?.toString() ?? ''); setPaymentAmount(total.toString()); setIsQuickAdding(false); }}
+                  onClick={openCheckoutPayment}
                 >
                   <CreditCard className="w-4 h-4 mr-2" />
                   Bayar
