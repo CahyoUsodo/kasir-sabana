@@ -924,6 +924,7 @@ export default function Kasir() {
   const total = Math.max(0, subtotal - txDiscountAmount);
   const paidAmount = Number(paymentAmount) || 0;
   const change = paidAmount - total;
+  const isExactPayment = total > 0 && paidAmount === total;
   const totalItemDiscount = cart.reduce((sum, item) => sum + getItemDiscountAmount(item), 0);
   const totalProfit = cart.reduce((sum, item) => sum + (item.product.price - item.product.hpp) * item.qty, 0) - totalItemDiscount - txDiscountAmount;
 
@@ -1831,7 +1832,12 @@ export default function Kasir() {
                   ))}
                   <button
                     onClick={() => { if (isCheckoutSubmitting) return; setPaymentAmount(total.toString()); setIsQuickAdding(false); }}
-                    className="flex-1 min-w-[calc(25%-6px)] h-9 rounded-lg border border-primary/30 bg-primary/5 text-xs font-semibold text-primary hover:bg-primary/10 active:scale-95 transition-all"
+                    className={cn(
+                      "flex-1 min-w-[calc(25%-6px)] h-9 rounded-lg border text-xs font-semibold active:scale-95 transition-all",
+                      isExactPayment
+                        ? "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10"
+                        : "border-border bg-muted/50 text-foreground hover:bg-primary/10 hover:border-primary hover:text-primary"
+                    )}
                   >
                     Uang Pas
                   </button>
