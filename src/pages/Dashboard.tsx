@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type TransactionItemRecord } from '@/lib/db';
 import { useState } from 'react';
-import { ShoppingCart, Package, BarChart3, TrendingUp, AlertTriangle, Receipt, ChevronRight, ClipboardList, Warehouse, DollarSign } from 'lucide-react';
+import { ShoppingCart, Package, BarChart3, TrendingUp, AlertTriangle, Receipt, ChevronRight, Warehouse, DollarSign } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -26,11 +26,6 @@ export default function Dashboard() {
   const todayTransactions = useLiveQuery(async () => {
     const all = await db.transactions.where('date').aboveOrEqual(today).toArray();
     return all.filter(t => t.status !== 'open');
-  }, []);
-
-  const openBillsCount = useLiveQuery(async () => {
-    const open = await db.transactions.where('status').equals('open').toArray();
-    return open.length;
   }, []);
 
   const lowStockProducts = useLiveQuery(async () => {
@@ -159,24 +154,6 @@ export default function Dashboard() {
           </Card>
         )}
       </div>
-
-      {/* Open Bills */}
-      {openBillsCount != null && openBillsCount > 0 && (
-        <Link to="/cashier?openBills=1" className="block">
-          <Card className="mt-2 border-0 bg-warning/10 shadow-sm transition-shadow hover:shadow-md">
-            <CardContent className="flex min-h-[72px] items-center gap-4 p-4">
-              <div className="w-10 h-10 rounded-xl bg-warning/20 text-warning flex items-center justify-center shrink-0">
-                <ClipboardList className="w-5 h-5" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold">Open Bills</p>
-                <p className="truncate text-xs text-muted-foreground">{openBillsCount} bill menunggu pembayaran</p>
-              </div>
-              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-            </CardContent>
-          </Card>
-        </Link>
-      )}
 
       {/* Quick Actions */}
       {visibleActions.length > 0 && (
