@@ -26,6 +26,7 @@ export default function DailyExpensesPage() {
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expensePurpose, setExpensePurpose] = useState('');
   const [expenseDate, setExpenseDate] = useState(todayDate);
+  const [expenseHistoryDate, setExpenseHistoryDate] = useState(todayDate);
   const [usageWarehouseItemId, setUsageWarehouseItemId] = useState('');
   const [usageQty, setUsageQty] = useState('');
   const [usagePurpose, setUsagePurpose] = useState('');
@@ -38,6 +39,18 @@ export default function DailyExpensesPage() {
   if (!can('manage_stock_inout')) {
     return <LockedPage title="Pengeluaran Harian" permissionLabel="Kelola Transaksi & Stok" />;
   }
+
+  const selectedExpenseHistoryStart = useMemo(() => {
+    const value = expenseHistoryDate ? new Date(`${expenseHistoryDate}T00:00:00`) : new Date();
+    value.setHours(0, 0, 0, 0);
+    return value;
+  }, [expenseHistoryDate]);
+
+  const selectedExpenseHistoryEnd = useMemo(() => {
+    const value = expenseHistoryDate ? new Date(`${expenseHistoryDate}T23:59:59.999`) : new Date();
+    value.setHours(23, 59, 59, 999);
+    return value;
+  }, [expenseHistoryDate]);
 
   const todayStart = useMemo(() => {
     const value = new Date();
@@ -62,12 +75,12 @@ export default function DailyExpensesPage() {
     return (focused.length > 0 ? focused : candidates).sort((a, b) => a.name.localeCompare(b.name, 'id'));
   }, [outputIds, warehouseItems]);
 
-  const todayDailyExpenses = useMemo(() => {
+  const filteredDailyExpenses = useMemo(() => {
     return (dailyExpenses ?? []).filter(expense => {
       const time = new Date(expense.date).getTime();
-      return time >= todayStart.getTime() && time <= todayEnd.getTime();
+      return time >= selectedExpenseHistoryStart.getTime() && time <= selectedExpenseHistoryEnd.getTime();
     });
-  }, [dailyExpenses, todayEnd, todayStart]);
+  }, [dailyExpenses, selectedExpenseHistoryEnd, selectedExpenseHistoryStart]);
 
   const todayWarehouseUsageLogs = useMemo(() => {
     return (warehouseUsageLogs ?? []).filter(log => {
@@ -76,9 +89,9 @@ export default function DailyExpensesPage() {
     });
   }, [todayEnd, todayStart, warehouseUsageLogs]);
 
-  const totalTodayExpenses = useMemo(() => {
-    return todayDailyExpenses.reduce((sum, item) => sum + item.amount, 0);
-  }, [todayDailyExpenses]);
+  const totalFilteredExpenses = useMemo(() => {
+    return filteredDailyExpenses.reduce((sum, item) => sum + item.amount, 0);
+  }, [filteredDailyExpenses]);
 
   const submitDailyExpense = async () => {
     try {
@@ -89,6 +102,7 @@ export default function DailyExpensesPage() {
       });
       setExpenseAmount('');
       setExpensePurpose('');
+      setExpenseHistoryDate(expenseDate || todayDate);
       setExpenseDate(todayDate);
       toast.success('Pengeluaran harian berhasil disimpan');
     } catch (error) {
@@ -197,15 +211,26 @@ export default function DailyExpensesPage() {
               Simpan Pengeluaran
             </Button>
             <div className="rounded-xl border bg-muted/20 p-3 space-y-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Lihat Riwayat Tanggal</Label>
+                <Input
+                  type="date"
+                  value={expenseHistoryDate}
+                  onChange={e => setExpenseHistoryDate(e.target.value)}
+                  className="h-10"
+                />
+              </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-muted-foreground">Total pengeluaran hari ini</span>
-                <span className="font-bold text-foreground">Rp {totalTodayExpenses.toLocaleString('id-ID')}</span>
+                <span className="font-semibold text-muted-foreground">
+                  Total pengeluaran {expenseHistoryDate ? format(new Date(`${expenseHistoryDate}T12:00:00`), 'dd MMM yyyy', { locale: localeId }) : 'tanggal dipilih'}
+                </span>
+                <span className="font-bold text-foreground">Rp {totalFilteredExpenses.toLocaleString('id-ID')}</span>
               </div>
               <div className="space-y-2">
-                {todayDailyExpenses.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground">Belum ada pengeluaran yang dicatat hari ini.</p>
+                {filteredDailyExpenses.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground">Belum ada pengeluaran pada tanggal yang dipilih.</p>
                 ) : (
-                  todayDailyExpenses.map(expense => (
+                  filteredDailyExpenses.map(expense => (
                     <div key={expense.id} className="flex items-start justify-between gap-3 rounded-lg border bg-background px-3 py-2">
                       <div className="min-w-0">
                         <p className="text-xs font-semibold break-words">{expense.purpose}</p>
