@@ -33,6 +33,7 @@ export default function Kasir() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const editTxIdParam = searchParams.get('editTxId');
+  const openBillsParam = searchParams.get('openBills');
 
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState<string>('all');
@@ -45,6 +46,7 @@ export default function Kasir() {
 
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [openBillsOpen, setOpenBillsOpen] = useState(false);
   const [txDiscountType, setTxDiscountType] = useState<'percentage' | 'nominal' | null>(null);
   const [txDiscountValue, setTxDiscountValue] = useState('');
   const [discountDialogOpen, setDiscountDialogOpen] = useState(false);
@@ -82,6 +84,21 @@ export default function Kasir() {
   const visibleWarehouseItems = useLiveQuery(() => db.warehouseItems.where('isDeleted').equals(0).toArray());
   const dailyPrepFormulas = useLiveQuery(() => db.dailyPrepFormulas.toArray());
   const paymentMethods = useLiveQuery(() => db.paymentMethods.toArray());
+  const openBills = useLiveQuery(async () => {
+    const rows = await db.transactions.where('status').equals('open').toArray();
+    return rows.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  });
+  const openBillItems = useLiveQuery(async () => {
+    if (!openBills || openBills.length === 0) return {};
+    const txIds = openBills.map(tx => tx.id!).filter(Boolean);
+    const items = await db.transactionItems.where('transactionId').anyOf(txIds).toArray();
+    const map: Record<number, TransactionItemRecord[]> = {};
+    for (const item of items) {
+      if (!map[item.transactionId]) map[item.transactionId] = [];
+      map[item.transactionId].push(item);
+    }
+    return map;
+  }, [openBills]);
   const storeSettings = useLiveQuery(() => db.storeSettings.toCollection().first());
   const allUsers = useLiveQuery(() => db.users.toArray());
   const productRecipes = useLiveQuery(() => db.productRecipes.toArray());
@@ -543,6 +560,7 @@ export default function Kasir() {
       setTableNumber(tx.tableNumber || '');
       setRemarks(tx.remarks || '');
       setServiceType(tx.serviceType || 'dine_in');
+      setOpenBillsOpen(false);
       setCartOpen(true);
     } catch (err) {
       console.error(err);
@@ -550,6 +568,15 @@ export default function Kasir() {
     }
   };
   loadTransactionForEditingRef.current = loadTransactionForEditing;
+
+  const handleOpenBillsOpenChange = (open: boolean) => {
+    setOpenBillsOpen(open);
+    if (!open && openBillsParam) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('openBills');
+      setSearchParams(next, { replace: true });
+    }
+  };
 
   useEffect(() => {
     if (editTxIdParam) {
@@ -561,6 +588,12 @@ export default function Kasir() {
       doFullResetRef.current?.();
     }
   }, [editTxIdParam, editingTxId]);
+
+  useEffect(() => {
+    if (openBillsParam === '1') {
+      setOpenBillsOpen(true);
+    }
+  }, [openBillsParam]);
 
   useEffect(() => {
     if (editingTxId !== null) return;
@@ -988,11 +1021,7 @@ export default function Kasir() {
   const handleSaveOpenBill = async () => {
     if (isCheckoutSubmitting) return;
     if (editingTxId && originalTx?.status !== 'open') return;
-    const finalCashierName = cashierNameInput.trim() || currentUser?.name?.trim() || '';
-    if (!finalCashierName) {
-      toast.error('Nama kasir wajib diisi');
-      return;
-    }
+    const openBillCashierName = cashierNameInput.trim() || currentUser?.name?.trim() || undefined;
 
     setIsCheckoutSubmitting(true);
     checkoutBatchRef.current = true;
@@ -1015,7 +1044,7 @@ export default function Kasir() {
           customerName: customerName.trim() || undefined,
           tableNumber: serviceType === 'take_away' ? undefined : (tableNumber.trim() || undefined),
           remarks: remarks.trim() || undefined,
-          cashierName: finalCashierName,
+          cashierName: openBillCashierName,
           serviceType,
         });
 
@@ -1043,7 +1072,7 @@ export default function Kasir() {
           remarks: remarks.trim() || undefined,
           openedAt: new Date(),
           createdBy: currentUser?.id,
-          cashierName: finalCashierName,
+          cashierName: openBillCashierName,
           serviceType,
         };
 
@@ -1269,7 +1298,7 @@ export default function Kasir() {
     <div className="px-4 pt-6 pb-4 h-[calc(100vh-4rem)]">
       <div className="flex flex-col md:flex-row gap-0 md:gap-4 h-full">
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          {/* Header */}
+      {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold flex items-center gap-2">
           <ShoppingCart className="w-5 h-5 text-primary" />
@@ -1280,6 +1309,18 @@ export default function Kasir() {
             </Badge>
           )}
         </h1>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 gap-1.5 rounded-full px-3 text-xs font-semibold"
+          onClick={() => setOpenBillsOpen(true)}
+        >
+          <ClipboardList className="w-4 h-4" />
+          <span className="hidden sm:inline">Lihat Open Bill</span>
+          <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+            {openBills?.length ?? 0}
+          </Badge>
+        </Button>
       </div>
 
       {/* Edit Notice Banner */}
@@ -1837,6 +1878,65 @@ export default function Kasir() {
       </Sheet>
       </div>{/* end mobile cart wrapper */}
 
+      <Sheet open={openBillsOpen} onOpenChange={handleOpenBillsOpenChange}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="text-left flex items-center gap-2">
+              <ClipboardList className="w-5 h-5 text-primary" />
+              Open Bill
+            </SheetTitle>
+          </SheetHeader>
+
+          <div className="mt-4 space-y-3">
+            {!openBills || openBills.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-6 text-center">
+                <p className="text-sm font-medium">Tidak ada open bill</p>
+                <p className="mt-1 text-xs text-muted-foreground">Bill yang disimpan akan muncul di sini.</p>
+              </div>
+            ) : (
+              openBills.map(tx => {
+                const items = tx.id ? openBillItems?.[tx.id] ?? [] : [];
+                const itemSummary = items.length > 0
+                  ? items.map(item => `${item.quantity}x ${item.productName}`).join(', ')
+                  : 'Item belum dimuat';
+
+                return (
+                  <button
+                    key={tx.id ?? tx.receiptNumber}
+                    type="button"
+                    className="w-full rounded-xl border bg-card p-3 text-left shadow-sm transition hover:border-primary/40 hover:bg-primary/5"
+                    onClick={() => {
+                      if (tx.id) {
+                        handleOpenBillsOpenChange(false);
+                        void loadTransactionForEditing(tx.id);
+                      }
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs text-muted-foreground">{tx.receiptNumber}</span>
+                          <Badge variant="secondary" className="h-5 bg-warning/20 px-1.5 text-[10px] text-warning">
+                            Open
+                          </Badge>
+                        </div>
+                        <p className="mt-1 line-clamp-2 text-sm font-medium">{itemSummary}</p>
+                        <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                          <span>{new Date(tx.date).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                          {tx.customerName && <span>{tx.customerName}</span>}
+                          {tx.tableNumber && <span>Meja {tx.tableNumber}</span>}
+                          {tx.serviceType && <span>{tx.serviceType === 'take_away' ? 'Take Away' : 'Dine In'}</span>}
+                        </div>
+                      </div>
+                      <span className="shrink-0 text-sm font-bold text-primary">{rp(tx.total)}</span>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Product Options Dialog */}
       <Dialog open={!!optionProduct} onOpenChange={(open) => { if (!open) { setOptionProduct(null); setSelectedOptionIds({}); } }}>

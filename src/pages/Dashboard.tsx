@@ -162,17 +162,17 @@ export default function Dashboard() {
 
       {/* Open Bills */}
       {openBillsCount != null && openBillsCount > 0 && (
-        <Link to="/cashier">
-          <Card className="border-0 shadow-sm bg-warning/10 hover:shadow-md transition-shadow cursor-pointer mt-2">
-            <CardContent className="p-4 flex items-center gap-4">
+        <Link to="/cashier?openBills=1" className="block">
+          <Card className="mt-2 border-0 bg-warning/10 shadow-sm transition-shadow hover:shadow-md">
+            <CardContent className="flex min-h-[72px] items-center gap-4 p-4">
               <div className="w-10 h-10 rounded-xl bg-warning/20 text-warning flex items-center justify-center shrink-0">
                 <ClipboardList className="w-5 h-5" />
               </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold">Open Bills</p>
-                <p className="text-xs text-muted-foreground">{openBillsCount} bill menunggu pembayaran</p>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold">Open Bills</p>
+                <p className="truncate text-xs text-muted-foreground">{openBillsCount} bill menunggu pembayaran</p>
               </div>
-              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
             </CardContent>
           </Card>
         </Link>
