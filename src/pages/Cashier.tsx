@@ -578,6 +578,14 @@ export default function Kasir() {
     }
   };
 
+  const handleLoadOpenBill = (txId: number) => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('openBills');
+    next.set('editTxId', String(txId));
+    setSearchParams(next, { replace: true });
+    setOpenBillsOpen(false);
+  };
+
   useEffect(() => {
     if (editTxIdParam) {
       const txId = Number(editTxIdParam);
@@ -1907,8 +1915,7 @@ export default function Kasir() {
                     className="w-full rounded-xl border bg-card p-3 text-left shadow-sm transition hover:border-primary/40 hover:bg-primary/5"
                     onClick={() => {
                       if (tx.id) {
-                        handleOpenBillsOpenChange(false);
-                        void loadTransactionForEditing(tx.id);
+                        handleLoadOpenBill(tx.id);
                       }
                     }}
                   >
