@@ -50,6 +50,26 @@ export function resolveCloudApiUrl(path: '/api/backup' | '/api/restore') {
   return isDirectCloudTarget ? `${VERCEL_BACKUP_BASE_URL}${path}` : path;
 }
 
+const bytesToBase64 = (bytes: Uint8Array) => {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+};
+
+const gzipTextToBase64 = async (text: string): Promise<string | null> => {
+  if (typeof CompressionStream === 'undefined') return null;
+
+  const stream = new Blob([text])
+    .stream()
+    .pipeThrough(new CompressionStream('gzip'));
+  const compressed = await new Response(stream).arrayBuffer();
+  return bytesToBase64(new Uint8Array(compressed));
+};
+
 export async function getBackupPayload(): Promise<BackupPayload> {
   return {
     version: BACKUP_SCHEMA_VERSION,
@@ -95,26 +115,41 @@ export async function performBackup(options: PerformBackupOptions = {}): Promise
   // karena '/api/backup' hanya ada di server Vercel.
   const apiUrl = resolveCloudApiUrl('/api/backup');
 
+  const backupJson = JSON.stringify(allData);
+  const compressedBackup = await gzipTextToBase64(backupJson);
+  const requestPayload = compressedBackup
+    ? {
+        storeName,
+        fileId: settings.googleDriveFileId,
+        compression: 'gzip',
+        backupDataCompressed: compressedBackup,
+      }
+    : {
+        storeName,
+        fileId: settings.googleDriveFileId,
+        backupData: allData,
+      };
+
   const response = await fetch(apiUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      storeName,
-      backupData: allData,
-      fileId: settings.googleDriveFileId
-    })
+    body: JSON.stringify(requestPayload)
   });
 
   if (!response.ok) {
     let errorMessage = 'Gagal menyimpan backup ke server.';
     try {
-      const errData = await response.json();
+      const rawError = await response.text();
+      const errData = rawError ? JSON.parse(rawError) : {};
       if (errData.error) errorMessage = errData.error;
     } catch (e) {
-      // Jika response gagal di-parse sebagai JSON (misal karena URL salah/404)
-      errorMessage = `Error ${response.status}: ${response.statusText}. Gagal terhubung ke Vercel.`;
+      if (response.status === 400 || response.status === 413) {
+        errorMessage = 'Backup ditolak server. Kemungkinan ukuran data backup terlalu besar untuk dikirim sekaligus. Coba hapus foto produk yang tidak perlu atau gunakan Export Backup (Manual) sebagai cadangan sementara.';
+      } else {
+        errorMessage = `Error ${response.status}: ${response.statusText}. Gagal terhubung ke Vercel.`;
+      }
     }
     throw new Error(errorMessage);
   }

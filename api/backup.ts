@@ -1,5 +1,6 @@
 import { google } from 'googleapis';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { gunzipSync } from 'zlib';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS setup
@@ -18,9 +19,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { storeName, backupData } = req.body;
+    const { storeName, backupData, backupDataCompressed, compression } = req.body;
+    let resolvedBackupData = backupData;
 
-    if (!storeName || !backupData) {
+    if (!resolvedBackupData && backupDataCompressed) {
+      if (compression !== 'gzip') {
+        return res.status(400).json({ error: 'Format kompresi backup tidak didukung.' });
+      }
+
+      try {
+        const compressedBuffer = Buffer.from(String(backupDataCompressed), 'base64');
+        const json = gunzipSync(compressedBuffer).toString('utf8');
+        resolvedBackupData = JSON.parse(json);
+      } catch (error) {
+        return res.status(400).json({ error: 'Data backup terkompresi tidak valid.' });
+      }
+    }
+
+    if (!storeName || !resolvedBackupData) {
       return res.status(400).json({ error: 'Missing storeName or backupData' });
     }
 
@@ -61,7 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     
     const media = {
       mimeType: 'application/json',
-      body: JSON.stringify(backupData, null, 2),
+      body: JSON.stringify(resolvedBackupData, null, 2),
     };
 
     let result;
