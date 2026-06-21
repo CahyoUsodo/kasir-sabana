@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Product, type Category, type Transaction, type TransactionItemRecord, type CartOptionSnapshot, adjustConfiguredStock, buildStockKey, getAvailableStockForSelection, getConfiguredProductReceiptDetails, getActiveDailyPrepFormulas, getMainDailyPrepItems, getDefaultOptionSelection, getSelectedOptionIds, repairInventoryAnomalies } from '@/lib/db';
 import { useState, useRef, useEffect } from 'react';
-import { Search, Plus, Minus, ShoppingCart, X, Percent, Tag, CreditCard, Banknote, Check, Package as PackageIcon, Pencil, User, Hash, Utensils, ShoppingBag, Warehouse } from 'lucide-react';
+import { Search, Plus, Minus, ShoppingCart, X, Percent, Tag, CreditCard, Banknote, Check, Package as PackageIcon, Pencil, User, Hash, Utensils, ShoppingBag, Warehouse, ClipboardList } from 'lucide-react';
 import Receipt from '@/components/Receipt';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -543,7 +543,6 @@ export default function Kasir() {
       setTableNumber(tx.tableNumber || '');
       setRemarks(tx.remarks || '');
       setServiceType(tx.serviceType || 'dine_in');
-      setOpenBillsOpen(false);
       setCartOpen(true);
     } catch (err) {
       console.error(err);
@@ -937,6 +936,139 @@ export default function Kasir() {
     setIsQuickAdding(false);
   };
 
+  const buildTransactionItemRecords = async (transactionId: number): Promise<TransactionItemRecord[]> => {
+    const itemRecords: TransactionItemRecord[] = [];
+    for (const cartItem of cart) {
+      const receiptDetails = cartItem.selectedOptions.length > 0
+        ? await getConfiguredProductReceiptDetails(
+            cartItem.product.id!,
+            cartItem.selectedOptions.map(option => option.optionId)
+          )
+        : [];
+      itemRecords.push({
+        transactionId,
+        productId: cartItem.product.id!,
+        productName: cartItem.product.name,
+        productBaseName: cartItem.baseName,
+        selectedOptions: cartItem.selectedOptions,
+        receiptDetails,
+        stockKey: cartItem.stockKey,
+        quantity: cartItem.qty,
+        price: cartItem.product.price,
+        hpp: cartItem.product.hpp,
+        discountType: cartItem.discountType,
+        discountValue: cartItem.discountValue,
+        discountAmount: getItemDiscountAmount(cartItem),
+        subtotal: getItemSubtotal(cartItem),
+        notes: cartItem.notes,
+      });
+    }
+    return itemRecords;
+  };
+
+  const applyCartStockDeltaFromOldItems = async (oldItems: TransactionItemRecord[]) => {
+    for (const cartItem of cart) {
+      const oldItem = oldItems.find(oi => (oi.stockKey || buildStockKey(oi.productId, oi.selectedOptions?.map(option => option.optionId) ?? [])) === cartItem.stockKey);
+      const oldQty = oldItem?.quantity ?? 0;
+      const delta = cartItem.qty - oldQty;
+      if (delta !== 0) {
+        await applyStockDelta(cartItem.product.id!, delta, cartItem.selectedOptions);
+      }
+    }
+
+    for (const oldItem of oldItems) {
+      const oldStockKey = oldItem.stockKey || buildStockKey(oldItem.productId, oldItem.selectedOptions?.map(option => option.optionId) ?? []);
+      const stillInCart = cart.find(c => c.stockKey === oldStockKey);
+      if (!stillInCart) {
+        await applyStockDelta(oldItem.productId, -oldItem.quantity, oldItem.selectedOptions ?? []);
+      }
+    }
+  };
+
+  const handleSaveOpenBill = async () => {
+    if (isCheckoutSubmitting) return;
+    if (editingTxId && originalTx?.status !== 'open') return;
+    const finalCashierName = cashierNameInput.trim() || currentUser?.name?.trim() || '';
+    if (!finalCashierName) {
+      toast.error('Nama kasir wajib diisi');
+      return;
+    }
+
+    setIsCheckoutSubmitting(true);
+    checkoutBatchRef.current = true;
+
+    try {
+      if (editingTxId) {
+        const oldItems = await db.transactionItems.where('transactionId').equals(editingTxId).toArray();
+
+        await db.transactions.update(editingTxId, {
+          status: 'open',
+          subtotal,
+          discountType: txDiscountType,
+          discountValue: Number(txDiscountValue) || 0,
+          discountAmount: txDiscountAmount,
+          total,
+          paymentMethodId: 0,
+          paymentAmount: 0,
+          change: 0,
+          profit: totalProfit,
+          customerName: customerName.trim() || undefined,
+          tableNumber: serviceType === 'take_away' ? undefined : (tableNumber.trim() || undefined),
+          remarks: remarks.trim() || undefined,
+          cashierName: finalCashierName,
+          serviceType,
+        });
+
+        await db.transactionItems.where('transactionId').equals(editingTxId).delete();
+        const itemRecords = await buildTransactionItemRecords(editingTxId);
+        await db.transactionItems.bulkAdd(itemRecords);
+        await applyCartStockDeltaFromOldItems(oldItems);
+      } else {
+        const receiptNumber = `OB${Date.now()}`;
+        const txData: Transaction = {
+          subtotal,
+          discountType: txDiscountType,
+          discountValue: Number(txDiscountValue) || 0,
+          discountAmount: txDiscountAmount,
+          total,
+          paymentMethodId: 0,
+          paymentAmount: 0,
+          change: 0,
+          profit: totalProfit,
+          date: new Date(),
+          receiptNumber,
+          status: 'open',
+          customerName: customerName.trim() || undefined,
+          tableNumber: serviceType === 'take_away' ? undefined : (tableNumber.trim() || undefined),
+          remarks: remarks.trim() || undefined,
+          openedAt: new Date(),
+          createdBy: currentUser?.id,
+          cashierName: finalCashierName,
+          serviceType,
+        };
+
+        const txId = await db.transactions.add(txData);
+        const itemRecords = await buildTransactionItemRecords(txId as number);
+        await db.transactionItems.bulkAdd(itemRecords);
+
+        for (const item of cart) {
+          await applyStockDelta(item.product.id!, item.qty, item.selectedOptions);
+        }
+      }
+
+      await repairInventoryAnomalies();
+      toast.success('Open bill berhasil disimpan');
+      doFullReset();
+      setCartOpen(false);
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : 'Gagal menyimpan open bill');
+    } finally {
+      checkoutBatchRef.current = false;
+      setIsCheckoutSubmitting(false);
+    }
+  };
+
   const handleCheckout = async () => {
     if (isCheckoutSubmitting) return;
     if (!paymentMethodId || paidAmount < total) return;
@@ -1124,6 +1256,7 @@ export default function Kasir() {
   };
 
   const cartCount = cart.reduce((s, c) => s + c.qty, 0);
+  const canSaveOpenBill = !editingTxId || originalTx?.status === 'open';
   const rp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
 
   // After all hooks: if user can't create transactions, render the locked
@@ -1208,6 +1341,7 @@ export default function Kasir() {
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
             {filtered.map(p => {
               const isOutOfStock = p.stock <= 0 && !cartProductIds.has(buildStockKey(p.id!));
+              const showOutOfStockBadge = false;
 
               return (
               <Card
@@ -1221,7 +1355,7 @@ export default function Kasir() {
                 onClick={() => addToCart(p)}
               >
                 <CardContent className="p-0 relative">
-                  {false && (
+                  {showOutOfStockBadge && (
                     <div className="absolute inset-x-2 top-2 z-10 rounded-full bg-muted-foreground/85 px-2 py-1 text-center text-[10px] font-semibold text-background">
                       Stok habis • buka produk
                     </div>
@@ -1447,9 +1581,21 @@ export default function Kasir() {
               </div>
 
               <div className="flex gap-2">
+                {canSaveOpenBill && (
+                  <Button
+                    variant="outline"
+                    className="h-12 flex-1 text-sm font-semibold"
+                    onClick={handleSaveOpenBill}
+                    disabled={isCheckoutSubmitting}
+                  >
+                    <ClipboardList className="w-4 h-4 mr-2" />
+                    Simpan Bill
+                  </Button>
+                )}
                 <Button
-                  className="w-full h-12 text-sm font-semibold"
+                  className="h-12 flex-1 text-sm font-semibold"
                   onClick={openCheckoutPayment}
+                  disabled={isCheckoutSubmitting}
                 >
                   <CreditCard className="w-4 h-4 mr-2" />
                   Bayar
@@ -1665,9 +1811,21 @@ export default function Kasir() {
 
               {/* Action buttons */}
               <div className="flex gap-2">
+                {canSaveOpenBill && (
+                  <Button
+                    variant="outline"
+                    className="h-12 flex-1 text-sm font-semibold"
+                    onClick={handleSaveOpenBill}
+                    disabled={isCheckoutSubmitting}
+                  >
+                    <ClipboardList className="w-4 h-4 mr-2" />
+                    Simpan Bill
+                  </Button>
+                )}
                 <Button
-                  className="w-full h-12 text-sm font-semibold"
+                  className="h-12 flex-1 text-sm font-semibold"
                   onClick={openCheckoutPayment}
+                  disabled={isCheckoutSubmitting}
                 >
                   <CreditCard className="w-4 h-4 mr-2" />
                   Bayar

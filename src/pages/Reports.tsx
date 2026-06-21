@@ -1,5 +1,5 @@
 ﻿import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type TransactionItemRecord } from '@/lib/db';
+import { db, type Transaction, type TransactionItemRecord } from '@/lib/db';
 import { useState } from 'react';
 import { BarChart3, TrendingUp, ShoppingCart, Package, DollarSign, ArrowDown, ArrowUp, Minus, Download, PackageMinus } from 'lucide-react';
 import type { Border, Borders, Fill, Style } from 'exceljs';
@@ -31,19 +31,22 @@ export default function Laporan() {
     : startOfDay(subDays(new Date(), days));
 
   const transactions = useLiveQuery(async () => {
+    let rows: Transaction[];
     if (period === 'custom') {
       if (dateFrom && dateTo) {
-        return db.transactions.where('date').between(startOfDay(dateFrom), endOfDay(dateTo), true, true).toArray();
+        rows = await db.transactions.where('date').between(startOfDay(dateFrom), endOfDay(dateTo), true, true).toArray();
       } else if (dateFrom) {
-        return db.transactions.where('date').aboveOrEqual(startOfDay(dateFrom)).toArray();
+        rows = await db.transactions.where('date').aboveOrEqual(startOfDay(dateFrom)).toArray();
       } else if (dateTo) {
-        return db.transactions.where('date').belowOrEqual(endOfDay(dateTo)).toArray();
+        rows = await db.transactions.where('date').belowOrEqual(endOfDay(dateTo)).toArray();
+      } else {
+        return []; // Return none if custom but no date selected to avoid pulling everything unnecessarily, or we could fetch all. Fetching all is bad for perf. Let's return none if no date filter.
       }
-      return []; // Return none if custom but no date selected to avoid pulling everything unnecessarily, or we could fetch all. Fetching all is bad for perf. Let's return none if no date filter.
     } else {
       const since = getPresetStartDate();
-      return db.transactions.where('date').aboveOrEqual(since).toArray();
+      rows = await db.transactions.where('date').aboveOrEqual(since).toArray();
     }
+    return rows.filter(tx => tx.status !== 'open');
   }, [days, period, dateFrom, dateTo]);
 
   // Query transaction items for the filtered transactions
