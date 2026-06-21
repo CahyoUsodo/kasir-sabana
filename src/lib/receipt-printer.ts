@@ -55,15 +55,20 @@ const wrapText = (text: string, maxWidth: number = 32): string[] => {
   return allLines;
 };
 
-const getEscPosImage = (base64Data: string, targetWidth: number = 160): Promise<Uint8Array | null> => {
+const PRINT_LOGO_WIDTH = 112;
+const PRINT_LOGO_MAX_HEIGHT = 64;
+
+const getEscPosImage = (base64Data: string, targetWidth: number = PRINT_LOGO_WIDTH): Promise<Uint8Array | null> => {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
-      const scale = targetWidth / img.width;
-      const targetHeight = Math.round(img.height * scale);
+      const scale = Math.min(targetWidth / img.width, PRINT_LOGO_MAX_HEIGHT / img.height, 1);
+      const targetHeight = Math.max(1, Math.round(img.height * scale));
+      const scaledWidth = Math.max(1, Math.round(img.width * scale));
+      const canvasWidth = Math.ceil(scaledWidth / 8) * 8;
 
       const canvas = document.createElement('canvas');
-      canvas.width = targetWidth;
+      canvas.width = canvasWidth;
       canvas.height = targetHeight;
       const ctx = canvas.getContext('2d');
       if (!ctx) {
@@ -71,10 +76,12 @@ const getEscPosImage = (base64Data: string, targetWidth: number = 160): Promise<
         return;
       }
 
-      ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-      const imgData = ctx.getImageData(0, 0, targetWidth, targetHeight);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, Math.floor((canvasWidth - scaledWidth) / 2), 0, scaledWidth, targetHeight);
+      const imgData = ctx.getImageData(0, 0, canvasWidth, targetHeight);
       const pixels = imgData.data;
-      const widthBytes = Math.ceil(targetWidth / 8);
+      const widthBytes = Math.ceil(canvasWidth / 8);
       const buffer = new Uint8Array(8 + widthBytes * targetHeight);
 
       buffer[0] = 0x1D;
@@ -92,8 +99,8 @@ const getEscPosImage = (base64Data: string, targetWidth: number = 160): Promise<
           let byteVal = 0;
           for (let bit = 0; bit < 8; bit++) {
             const pxX = x * 8 + bit;
-            if (pxX < targetWidth) {
-              const pxIndex = (y * targetWidth + pxX) * 4;
+            if (pxX < canvasWidth) {
+              const pxIndex = (y * canvasWidth + pxX) * 4;
               const r = pixels[pxIndex];
               const g = pixels[pxIndex + 1];
               const b = pixels[pxIndex + 2];
@@ -143,7 +150,7 @@ export const buildReceiptPrintData = async ({
 
   let logoBuffer: Uint8Array | null = null;
   if (mode === 'customer' && storeSettings?.logo) {
-    logoBuffer = await getEscPosImage(storeSettings.logo, 160);
+    logoBuffer = await getEscPosImage(storeSettings.logo);
   }
 
   const encoder = new TextEncoder();
