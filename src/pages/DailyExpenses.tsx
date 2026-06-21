@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { format } from 'date-fns';
+import { format, isSameDay } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
 import { DollarSign, PackageMinus, Trash2 } from 'lucide-react';
 import { db, deleteDailyExpenseEntry, recordDailyExpense, recordWarehouseUsage, revertWarehouseUsageLog } from '@/lib/db';
@@ -22,8 +22,10 @@ import { formatNumberInput, parseFormattedNumber } from '@/lib/utils';
 
 export default function DailyExpensesPage() {
   const { can } = useAuth();
+  const todayDate = new Date().toLocaleDateString('en-CA');
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expensePurpose, setExpensePurpose] = useState('');
+  const [expenseDate, setExpenseDate] = useState(todayDate);
   const [usageWarehouseItemId, setUsageWarehouseItemId] = useState('');
   const [usageQty, setUsageQty] = useState('');
   const [usagePurpose, setUsagePurpose] = useState('');
@@ -83,9 +85,11 @@ export default function DailyExpensesPage() {
       await recordDailyExpense({
         amount: parseFormattedNumber(expenseAmount),
         purpose: expensePurpose,
+        date: expenseDate ? new Date(`${expenseDate}T12:00:00`) : undefined,
       });
       setExpenseAmount('');
       setExpensePurpose('');
+      setExpenseDate(todayDate);
       toast.success('Pengeluaran harian berhasil disimpan');
     } catch (error) {
       console.error(error);
@@ -173,9 +177,21 @@ export default function DailyExpensesPage() {
                 />
               </div>
             </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Tanggal Kejadian Pengeluaran</Label>
+              <Input
+                type="date"
+                value={expenseDate}
+                onChange={e => setExpenseDate(e.target.value)}
+                className="h-10"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Laporan kas dan pengeluaran akan mengikuti tanggal kejadian ini, bukan waktu saat data diinput.
+              </p>
+            </div>
             <Button
               onClick={submitDailyExpense}
-              disabled={parseFormattedNumber(expenseAmount) <= 0 || !expensePurpose.trim()}
+              disabled={parseFormattedNumber(expenseAmount) <= 0 || !expensePurpose.trim() || !expenseDate}
               className="w-full h-10 text-xs font-semibold"
             >
               Simpan Pengeluaran
@@ -194,8 +210,14 @@ export default function DailyExpensesPage() {
                       <div className="min-w-0">
                         <p className="text-xs font-semibold break-words">{expense.purpose}</p>
                         <p className="text-[11px] text-muted-foreground">
-                          {format(new Date(expense.date), 'dd MMM yyyy HH:mm', { locale: localeId })}
+                          Tanggal kejadian {format(new Date(expense.date), 'dd MMM yyyy', { locale: localeId })}
                         </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          Diinput {format(new Date(expense.createdAt), 'dd MMM yyyy HH:mm', { locale: localeId })}
+                        </p>
+                        {!isSameDay(new Date(expense.date), new Date(expense.createdAt)) && (
+                          <p className="text-[11px] font-medium text-warning">Input terlambat</p>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-xs font-bold text-foreground">Rp {expense.amount.toLocaleString('id-ID')}</span>

@@ -220,6 +220,22 @@ describe("daily operational records", () => {
     await expect(db.dailyExpenses.toArray()).resolves.toHaveLength(0);
   });
 
+  it("stores expense date separately from input time", async () => {
+    const incidentDate = new Date("2026-06-20T12:00:00");
+    const beforeInput = Date.now();
+
+    await recordDailyExpense({
+      amount: 18000,
+      purpose: "Beli gas dadakan",
+      date: incidentDate,
+    });
+
+    const expenses = await db.dailyExpenses.toArray();
+    expect(expenses).toHaveLength(1);
+    expect(new Date(expenses[0].date).toISOString()).toBe(incidentDate.toISOString());
+    expect(new Date(expenses[0].createdAt).getTime()).toBeGreaterThanOrEqual(beforeInput);
+  });
+
   it("deducts stock when recording manual warehouse usage and restores it when reverted", async () => {
     const now = new Date();
     const itemId = await db.warehouseItems.add({

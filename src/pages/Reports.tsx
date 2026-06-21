@@ -6,7 +6,7 @@ import type { Border, Borders, Fill, Style } from 'exceljs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
-import { format, subDays, startOfDay, endOfDay, addDays } from 'date-fns';
+import { format, subDays, startOfDay, endOfDay, addDays, isSameDay } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
 import { CalendarIcon, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -1316,19 +1316,21 @@ export default function Laporan() {
     const wsPengeluaran = wb.addWorksheet('Pengeluaran Harian', { views: [{ state: 'frozen', ySplit: 1 }] });
     wsPengeluaran.columns = [
       { header: 'No', key: 'no', width: 6 },
-      { header: 'Tanggal', key: 'date', width: 22 },
-      { header: 'Keperluan', key: 'purpose', width: 42 },
+      { header: 'Tanggal Kejadian', key: 'date', width: 18 },
+      { header: 'Diinput', key: 'createdAt', width: 22 },
+      { header: 'Keperluan', key: 'purpose', width: 38 },
       { header: 'Nominal', key: 'amount', width: 18, style: { numFmt: currencyFormat } },
     ];
     wsPengeluaran.getRow(1).eachCell(cell => {
       cell.style = headerStyle;
     });
-    wsPengeluaran.autoFilter = 'A1:D1';
+    wsPengeluaran.autoFilter = 'A1:E1';
 
     (dailyExpenses ?? []).forEach((expense, index) => {
       const row = wsPengeluaran.addRow({
         no: index + 1,
-        date: format(new Date(expense.date), 'dd-MM-yyyy HH:mm', { locale: localeId }),
+        date: format(new Date(expense.date), 'dd-MM-yyyy', { locale: localeId }),
+        createdAt: format(new Date(expense.createdAt), 'dd-MM-yyyy HH:mm', { locale: localeId }),
         purpose: expense.purpose,
         amount: expense.amount,
       });
@@ -1339,7 +1341,7 @@ export default function Laporan() {
       no: 'Total',
       amount: totalOperationalExpenses,
     });
-    wsPengeluaran.mergeCells(`A${expenseTotalRow.number}:C${expenseTotalRow.number}`);
+    wsPengeluaran.mergeCells(`A${expenseTotalRow.number}:D${expenseTotalRow.number}`);
     expenseTotalRow.getCell('A').alignment = { horizontal: 'right', vertical: 'middle' };
     expenseTotalRow.eachCell(cell => {
       cell.border = cellBorder;
@@ -1655,8 +1657,13 @@ export default function Laporan() {
                     <div className="min-w-0">
                       <p className="text-sm break-words">{expense.purpose}</p>
                       <p className="text-[10px] text-muted-foreground">
-                        {format(new Date(expense.date), 'dd MMM yyyy HH:mm', { locale: localeId })}
+                        Tanggal kejadian {format(new Date(expense.date), 'dd MMM yyyy', { locale: localeId })}
                       </p>
+                      {!isSameDay(new Date(expense.date), new Date(expense.createdAt)) && (
+                        <p className="text-[10px] text-muted-foreground">
+                          Diinput {format(new Date(expense.createdAt), 'dd MMM yyyy HH:mm', { locale: localeId })}
+                        </p>
+                      )}
                     </div>
                     <p className="text-xs font-bold shrink-0">{rp(expense.amount)}</p>
                   </div>

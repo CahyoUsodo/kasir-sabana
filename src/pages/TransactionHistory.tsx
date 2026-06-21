@@ -645,7 +645,7 @@ export default function TransactionHistory() {
             <AlertDialogCancel>Batal</AlertDialogCancel>
             <AlertDialogAction onClick={(e) => {
               e.preventDefault();
-              if (storeSettings?.securityPin) {
+              if (storeSettings?.securityPin && selectedTx?.status !== 'open') {
                 setDeleteDialogOpen(false);
                 setTimeout(() => setPinVerifyOpen(true), 150);
               } else {

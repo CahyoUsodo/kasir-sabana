@@ -121,7 +121,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="px-4 pt-6 space-y-5">
+    <div className="px-4 pt-6 pb-24 md:pb-8 space-y-5">
       {/* Header */}
       <div>
         <p className="text-sm text-muted-foreground">{format(new Date(), 'EEEE, d MMMM yyyy', { locale: id })}</p>
