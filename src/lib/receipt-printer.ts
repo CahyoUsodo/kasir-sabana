@@ -55,8 +55,10 @@ const wrapText = (text: string, maxWidth: number = 32): string[] => {
   return allLines;
 };
 
-const PRINT_LOGO_WIDTH = 112;
-const PRINT_LOGO_MAX_HEIGHT = 64;
+const PRINT_LOGO_OUTPUT_WIDTH = 160;
+const PRINT_LOGO_RASTER_SCALE = 0.5;
+const PRINT_LOGO_WIDTH = Math.round(PRINT_LOGO_OUTPUT_WIDTH * PRINT_LOGO_RASTER_SCALE);
+const PRINT_LOGO_MAX_HEIGHT = Math.round(PRINT_LOGO_OUTPUT_WIDTH * PRINT_LOGO_RASTER_SCALE);
 
 const getEscPosImage = (base64Data: string, targetWidth: number = PRINT_LOGO_WIDTH): Promise<Uint8Array | null> => {
   return new Promise((resolve) => {
@@ -87,7 +89,7 @@ const getEscPosImage = (base64Data: string, targetWidth: number = PRINT_LOGO_WID
       buffer[0] = 0x1D;
       buffer[1] = 0x76;
       buffer[2] = 0x30;
-      buffer[3] = 0;
+      buffer[3] = 3;
       buffer[4] = widthBytes % 256;
       buffer[5] = Math.floor(widthBytes / 256);
       buffer[6] = targetHeight % 256;
