@@ -84,12 +84,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Jika menggunakan FILE_ID (Bypass masalah Service Account Quota)
     if (fileId) {
-      // Force mimeType to application/json so Google Docs files get converted
+      const fileMeta = await drive.files.get({
+        fileId,
+        fields: 'id,name,mimeType',
+      });
+      const targetMimeType = fileMeta.data.mimeType || '';
+
+      if (targetMimeType.startsWith('application/vnd.google-apps.')) {
+        return res.status(400).json({
+          error: 'File ID mengarah ke Google Docs/Sheets/Workspace. Backup cloud harus memakai file JSON biasa di Google Drive, bukan dokumen Google Workspace.',
+        });
+      }
+
       result = await drive.files.update({
         fileId: fileId,
-        requestBody: {
-          mimeType: 'application/json',
-        },
         media: media,
       });
       return res.status(200).json({ success: true, fileId: result.data.id });

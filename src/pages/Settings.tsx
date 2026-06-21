@@ -967,7 +967,7 @@ export default function Pengaturan() {
               <Input 
                 value={tempFileId} 
                 onChange={(e) => setTempFileId(e.target.value)}
-                placeholder="Masukkan ID File Docs (opsional)" 
+                placeholder="Masukkan ID file JSON Google Drive (opsional)" 
                 className="h-9 text-xs flex-1"
               />
               {tempFileId !== (storeSettings?.googleDriveFileId || '') && (
@@ -991,7 +991,7 @@ export default function Pengaturan() {
                 </Button>
               )}
             </div>
-            <p className="text-[10px] text-muted-foreground leading-tight">Jika diisi, backup akan menimpa file ini. Sangat berguna jika Anda memiliki beberapa cabang agar backup tidak saling tertimpa (tiap cabang beda ID File).</p>
+            <p className="text-[10px] text-muted-foreground leading-tight">Jika diisi, backup akan menimpa file JSON ini. Jangan isi dengan ID Google Docs/Google Sheets. Sangat berguna jika Anda memiliki beberapa cabang agar backup tidak saling tertimpa (tiap cabang beda ID file).</p>
           </div>
           <div className="space-y-2">
             <Button variant="outline" className="w-full h-10 text-sm gap-2" onClick={exportBackupData}>
