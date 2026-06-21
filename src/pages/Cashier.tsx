@@ -73,6 +73,7 @@ export default function Kasir() {
   const loadTransactionForEditingRef = useRef<((txId: number) => Promise<void>) | null>(null);
   const doFullResetRef = useRef<(() => void) | null>(null);
   const checkoutBatchRef = useRef(false);
+  const autoOpenReceiptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [prepModalOpen, setPrepModalOpen] = useState(false);
   const [prepCounts, setPrepCounts] = useState<Record<number, string>>({});
@@ -105,6 +106,27 @@ export default function Kasir() {
   const productOptionGroups = useLiveQuery(() => db.productOptionGroups.toArray());
   const productOptions = useLiveQuery(() => db.productOptions.toArray());
   const productOptionRecipes = useLiveQuery(() => db.productOptionRecipes.toArray());
+
+  const clearAutoOpenReceiptTimer = () => {
+    if (autoOpenReceiptTimerRef.current) {
+      clearTimeout(autoOpenReceiptTimerRef.current);
+      autoOpenReceiptTimerRef.current = null;
+    }
+  };
+
+  const scheduleReceiptOpen = () => {
+    clearAutoOpenReceiptTimer();
+    autoOpenReceiptTimerRef.current = setTimeout(() => {
+      autoOpenReceiptTimerRef.current = null;
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => setReceiptOpen(true));
+        });
+        return;
+      }
+      setReceiptOpen(true);
+    }, 450);
+  };
 
   // Permission gate — kept render-side (not redirect) so the bottom nav stays
   // intact. All hooks above run unconditionally; we just swap the rendered tree.
@@ -611,6 +633,12 @@ export default function Kasir() {
   useEffect(() => {
     // Remove any legacy cashier draft because draft persistence is disabled.
     window.localStorage.removeItem('kasir-draft-v1');
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearAutoOpenReceiptTimer();
+    };
   }, []);
 
   const todayStr = new Date().toLocaleDateString('en-CA');
@@ -1204,10 +1232,14 @@ export default function Kasir() {
       const updatedTx = await db.transactions.get(editingTxId);
       setLastTransaction(updatedTx || null);
       setLastTxItems(itemRecords);
+      scheduleReceiptOpen();
       toast.success(`Transaksi berhasil! ${updatedTx?.receiptNumber}`, {
         action: {
           label: 'Lihat Struk',
-          onClick: () => setReceiptOpen(true),
+          onClick: () => {
+            clearAutoOpenReceiptTimer();
+            setReceiptOpen(true);
+          },
         },
       });
     } else {
@@ -1272,10 +1304,14 @@ export default function Kasir() {
 
       setLastTransaction({ ...txData, id: txId as number });
       setLastTxItems(itemRecords);
+      scheduleReceiptOpen();
       toast.success(`Transaksi berhasil! ${receiptNumber}`, {
         action: {
           label: 'Lihat Struk',
-          onClick: () => setReceiptOpen(true),
+          onClick: () => {
+            clearAutoOpenReceiptTimer();
+            setReceiptOpen(true);
+          },
         },
       });
     }
