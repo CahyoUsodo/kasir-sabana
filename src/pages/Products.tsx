@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Product, type Category, type ProductOption, type ProductOptionGroup, autoLinkChickenRecipes, upsertProductOptionRecipe, duplicateProduct, getDefaultOptionIdsForProduct } from '@/lib/db';
+import { db, type Product, type Category, type ProductOption, type ProductOptionGroup, upsertProductOptionRecipe, duplicateProduct, getDefaultOptionIdsForProduct } from '@/lib/db';
 import { useState, useRef, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, Package as PackageIcon, Camera, X, Settings2, Layers, Link as LinkIcon, Copy } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -627,7 +627,6 @@ export default function Produk() {
         deletedAt: null,
       } as Product);
     }
-    await autoLinkChickenRecipes();
     setDialogOpen(false);
   };
 

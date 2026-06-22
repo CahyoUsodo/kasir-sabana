@@ -1394,9 +1394,6 @@ export async function seedDefaultData() {
     }
   }
 
-  // Auto-link chicken products to warehouse items if not already linked
-  await autoLinkChickenRecipes();
-
   // Seed default daily prep formulas & Ayam Potong 9
   const now = new Date();
   const ayamPotongItem = await db.warehouseItems.where('name').equalsIgnoreCase('Ayam Potong 9').first();
