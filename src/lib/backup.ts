@@ -1,7 +1,7 @@
 import { db } from './db';
 
 const VERCEL_BACKUP_BASE_URL = 'https://kasir-sabana.vercel.app';
-const BACKUP_SCHEMA_VERSION = 14;
+const BACKUP_SCHEMA_VERSION = 15;
 
 export interface BackupPayload {
   version: number;
@@ -26,6 +26,7 @@ export interface BackupPayload {
   dailyPrepFormulas: Awaited<ReturnType<typeof db.dailyPrepFormulas.toArray>>;
   dailyExpenses: Awaited<ReturnType<typeof db.dailyExpenses.toArray>>;
   warehouseUsageLogs: Awaited<ReturnType<typeof db.warehouseUsageLogs.toArray>>;
+  warehouseStockEntryLogs: Awaited<ReturnType<typeof db.warehouseStockEntryLogs.toArray>>;
 }
 
 export interface PerformBackupOptions {
@@ -94,6 +95,7 @@ export async function getBackupPayload(): Promise<BackupPayload> {
     dailyPrepFormulas: await db.dailyPrepFormulas.toArray(),
     dailyExpenses: await db.dailyExpenses.toArray(),
     warehouseUsageLogs: await db.warehouseUsageLogs.toArray(),
+    warehouseStockEntryLogs: await db.warehouseStockEntryLogs.toArray(),
   };
 }
 

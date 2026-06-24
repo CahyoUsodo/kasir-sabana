@@ -285,6 +285,20 @@ export interface WarehouseUsageLog {
   createdAt: Date;
 }
 
+export interface WarehouseStockEntryLog {
+  id?: number;
+  entryGroupId: string;
+  warehouseItemId: number;
+  warehouseItemName: string;
+  quantity: number;
+  unit: string;
+  source: 'manual' | 'ocr_assisted';
+  note?: string;
+  date: Date;
+  createdAt: Date;
+  createdBy?: number;
+}
+
 export function getActiveDailyPrepFormulas(
   formulas: DailyPrepFormula[] = [],
   warehouseItems: WarehouseItem[] = []
@@ -327,6 +341,7 @@ class PosDatabase extends Dexie {
   dailyPrepFormulas!: Table<DailyPrepFormula>;
   dailyExpenses!: Table<DailyExpense>;
   warehouseUsageLogs!: Table<WarehouseUsageLog>;
+  warehouseStockEntryLogs!: Table<WarehouseStockEntryLog>;
 
   constructor() {
     super('kasirgratisan-db');
@@ -763,6 +778,30 @@ class PosDatabase extends Dexie {
       dailyExpenses: '++id, date, createdAt',
       warehouseUsageLogs: '++id, warehouseItemId, date, createdAt',
     });
+
+    this.version(15).stores({
+      categories:       '++id, name, isDeleted',
+      products:         '++id, name, &sku, categoryId, barcode, isDeleted, createdBy, updatedBy',
+      suppliers:        '++id, name, isDeleted',
+      stockIns:         '++id, productId, supplierId, date, createdBy',
+      stockOuts:        '++id, productId, date, createdBy',
+      hppHistory:       '++id, productId, date',
+      paymentMethods:   '++id, name, category',
+      transactions:     '++id, date, &receiptNumber, paymentMethodId, status, orderNumber, createdBy',
+      transactionItems: '++id, transactionId, productId, stockKey',
+      storeSettings:    '++id',
+      units:            '++id, &name, isDeleted',
+      users:            '++id, &username, role, isActive',
+      warehouseItems:   '++id, name, isDeleted, isCashierVisible, isDailyReset',
+      productRecipes:   '++id, productId, warehouseItemId, [productId+warehouseItemId]',
+      dailyPrepFormulas: '++id, prepItemId, targetItemId, [prepItemId+targetItemId]',
+      productOptionGroups: '++id, productId, isDeleted, [productId+sortOrder]',
+      productOptions: '++id, groupId, isDeleted, [groupId+sortOrder]',
+      productOptionRecipes: '++id, optionId, warehouseItemId, [optionId+warehouseItemId]',
+      dailyExpenses: '++id, date, createdAt',
+      warehouseUsageLogs: '++id, warehouseItemId, date, createdAt',
+      warehouseStockEntryLogs: '++id, entryGroupId, warehouseItemId, date, createdAt, createdBy',
+    });
   }
 }
 
@@ -886,6 +925,109 @@ export async function revertWarehouseUsageLog(logId: number) {
     }
 
     await db.warehouseUsageLogs.delete(logId);
+  });
+}
+
+export async function recordWarehouseStockEntry(input: {
+  items: Array<{
+    warehouseItemId: number;
+    quantity: number;
+  }>;
+  note?: string;
+  date?: Date;
+  source?: 'manual' | 'ocr_assisted';
+  createdBy?: number;
+}) {
+  const normalizedItems = input.items
+    .map(item => ({
+      warehouseItemId: Number(item.warehouseItemId),
+      quantity: Number(item.quantity) || 0,
+    }))
+    .filter(item => item.warehouseItemId > 0 && item.quantity > 0);
+
+  if (normalizedItems.length === 0) {
+    throw new Error('Minimal satu barang dengan jumlah lebih dari 0 wajib diisi');
+  }
+
+  const groupedItems = new Map<number, number>();
+  for (const item of normalizedItems) {
+    groupedItems.set(item.warehouseItemId, (groupedItems.get(item.warehouseItemId) || 0) + item.quantity);
+  }
+
+  const note = input.note?.trim();
+  const date = input.date || new Date();
+  const createdAt = new Date();
+  const entryGroupId = `stock-entry-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const source = input.source || 'manual';
+
+  return db.transaction('rw', [db.warehouseItems, db.warehouseStockEntryLogs], async () => {
+    const logPayload: WarehouseStockEntryLog[] = [];
+
+    for (const [warehouseItemId, quantity] of groupedItems.entries()) {
+      const item = await db.warehouseItems.get(warehouseItemId);
+      if (!item || item.isDeleted === 1) {
+        throw new Error('Salah satu barang gudang tidak ditemukan');
+      }
+
+      await db.warehouseItems.update(item.id!, {
+        stock: item.stock + quantity,
+        updatedAt: createdAt,
+      });
+
+      logPayload.push({
+        entryGroupId,
+        warehouseItemId: item.id!,
+        warehouseItemName: item.name,
+        quantity,
+        unit: item.unit,
+        source,
+        note,
+        date,
+        createdAt,
+        createdBy: input.createdBy,
+      });
+    }
+
+    await db.warehouseStockEntryLogs.bulkAdd(logPayload);
+    return entryGroupId;
+  });
+}
+
+export async function revertWarehouseStockEntryGroup(entryGroupId: string) {
+  return db.transaction('rw', [db.warehouseItems, db.warehouseStockEntryLogs], async () => {
+    const logs = await db.warehouseStockEntryLogs.where('entryGroupId').equals(entryGroupId).toArray();
+
+    if (logs.length === 0) {
+      return;
+    }
+
+    for (const log of logs) {
+      const item = await db.warehouseItems.get(log.warehouseItemId);
+
+      if (!item) {
+        throw new Error(`Barang gudang "${log.warehouseItemName}" tidak ditemukan`);
+      }
+
+      if (item.stock < log.quantity) {
+        throw new Error(
+          `Stok "${item.name}" saat ini tinggal ${item.stock} ${item.unit}. Batch tidak bisa dihapus karena akan membuat stok minus.`
+        );
+      }
+    }
+
+    const updatedAt = new Date();
+
+    for (const log of logs) {
+      const item = await db.warehouseItems.get(log.warehouseItemId);
+      if (!item) continue;
+
+      await db.warehouseItems.update(item.id!, {
+        stock: item.stock - log.quantity,
+        updatedAt,
+      });
+    }
+
+    await db.warehouseStockEntryLogs.where('entryGroupId').equals(entryGroupId).delete();
   });
 }
 

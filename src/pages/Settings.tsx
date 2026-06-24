@@ -195,6 +195,7 @@ export default function Pengaturan() {
       db.dailyPrepFormulas,
       db.dailyExpenses,
       db.warehouseUsageLogs,
+      db.warehouseStockEntryLogs,
     ], async () => {
       await db.categories.clear();
       await db.products.clear();
@@ -216,6 +217,7 @@ export default function Pengaturan() {
       await db.dailyPrepFormulas.clear();
       await db.dailyExpenses.clear();
       await db.warehouseUsageLogs.clear();
+      await db.warehouseStockEntryLogs.clear();
 
       if (data.categories?.length) await db.categories.bulkAdd(data.categories);
       if (data.products?.length) await db.products.bulkAdd(data.products);
@@ -235,6 +237,7 @@ export default function Pengaturan() {
       if (data.dailyPrepFormulas?.length) await db.dailyPrepFormulas.bulkAdd(data.dailyPrepFormulas);
       if (data.dailyExpenses?.length) await db.dailyExpenses.bulkAdd(data.dailyExpenses);
       if (data.warehouseUsageLogs?.length) await db.warehouseUsageLogs.bulkAdd(data.warehouseUsageLogs);
+      if (data.warehouseStockEntryLogs?.length) await db.warehouseStockEntryLogs.bulkAdd(data.warehouseStockEntryLogs);
 
       if (Array.isArray(data.units) && data.units.length > 0) {
         await db.units.bulkAdd(data.units);

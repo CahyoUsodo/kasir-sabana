@@ -12,8 +12,8 @@ import {
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { 
   Warehouse, Plus, Trash2, Edit2, ChevronLeft, ArrowRight,
-  Scale, X, Layers, AlertCircle, ShoppingBag,
-  Camera, Minus, Search
+  Scale, X, Layers, AlertCircle, ShoppingBag, ClipboardList,
+  Camera, Minus, Search, Check, ChevronsUpDown
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -23,7 +23,9 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { 
   Select, 
   SelectContent, 
@@ -118,6 +120,8 @@ export default function WarehousePage() {
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [selectedWarehouseItemId, setSelectedWarehouseItemId] = useState<string>('');
   const [recipeQty, setRecipeQty] = useState('1');
+  const [productComboboxOpen, setProductComboboxOpen] = useState(false);
+  const [warehouseComboboxOpen, setWarehouseComboboxOpen] = useState(false);
 
   // Daily Prep states
   const [prepDialog, setPrepDialog] = useState(false);
@@ -487,6 +491,26 @@ export default function WarehousePage() {
   const prepItemUnit = prepItemId ? warehouseItems?.find(wi => wi.id === prepItemId)?.unit : '';
   const prepItemFactor = prepItemId ? (warehouseItems?.find(wi => wi.id === prepItemId)?.dailyPrepFactor || 1) : 1;
   const editingWarehouseItem = itemEditId ? warehouseItems?.find(item => item.id === itemEditId) : undefined;
+  const sortedCashierProducts = useMemo(() => {
+    return [...(cashierProducts ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'id'));
+  }, [cashierProducts]);
+  const sortedWarehouseRecipeItems = useMemo(() => {
+    return [...(warehouseItems ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'id'));
+  }, [warehouseItems]);
+
+  const selectedProductLabel = selectedProductId
+    ? (() => {
+        const product = sortedCashierProducts.find(item => item.id?.toString() === selectedProductId);
+        return product ? `${product.name} (${product.sku})` : 'Pilih Produk';
+      })()
+    : 'Pilih Produk';
+
+  const selectedWarehouseItemLabel = selectedWarehouseItemId
+    ? (() => {
+        const item = sortedWarehouseRecipeItems.find(entry => entry.id?.toString() === selectedWarehouseItemId);
+        return item ? `${item.name} (${item.unit})` : 'Pilih Barang Gudang';
+      })()
+    : 'Pilih Barang Gudang';
 
   const prepSourcesByTarget = useMemo(() => {
     return activeFormulas.reduce<Record<number, WarehouseItem[]>>((acc, formula) => {
@@ -703,9 +727,16 @@ export default function WarehousePage() {
         <TabsContent value="stok" className="mt-4 space-y-4">
           <div className="flex justify-between items-center">
             <h3 className="text-sm font-bold text-muted-foreground">Daftar Bahan Baku</h3>
-            <Button size="sm" className="h-9 text-xs font-semibold gap-1.5" onClick={openItemAdd}>
-              <Plus className="w-4 h-4" /> Tambah Barang
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button asChild size="sm" variant="outline" className="h-9 text-xs font-semibold gap-1.5">
+                <Link to="/warehouse/stock-entry">
+                  <ClipboardList className="w-4 h-4" /> Input Stock Barang
+                </Link>
+              </Button>
+              <Button size="sm" className="h-9 text-xs font-semibold gap-1.5" onClick={openItemAdd}>
+                <Plus className="w-4 h-4" /> Tambah Barang
+              </Button>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -1200,34 +1231,90 @@ export default function WarehousePage() {
           <div className="space-y-4 mt-2">
             <div className="space-y-1.5">
               <Label>Pilih Produk Kasir</Label>
-              <Select value={selectedProductId} onValueChange={setSelectedProductId}>
-                <SelectTrigger className="h-11">
-                  <SelectValue placeholder="Pilih Produk" />
-                </SelectTrigger>
-                <SelectContent>
-                  {cashierProducts?.map(prod => (
-                    <SelectItem key={prod.id} value={prod.id!.toString()}>
-                      {prod.name} ({prod.sku})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={productComboboxOpen} onOpenChange={setProductComboboxOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={productComboboxOpen}
+                    className="h-11 w-full justify-between font-normal"
+                  >
+                    <span className="truncate">{selectedProductLabel}</span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Cari produk kasir..." />
+                    <CommandList>
+                      <CommandEmpty>Produk tidak ditemukan.</CommandEmpty>
+                      {sortedCashierProducts.map(prod => (
+                        <CommandItem
+                          key={prod.id}
+                          value={`${prod.name} ${prod.sku}`}
+                          onSelect={() => {
+                            setSelectedProductId(prod.id!.toString());
+                            setProductComboboxOpen(false);
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              'mr-2 h-4 w-4',
+                              selectedProductId === prod.id!.toString() ? 'opacity-100' : 'opacity-0'
+                            )}
+                          />
+                          <span className="truncate">{prod.name} ({prod.sku})</span>
+                        </CommandItem>
+                      ))}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
 
             <div className="space-y-1.5">
               <Label>Pilih Barang Gudang</Label>
-              <Select value={selectedWarehouseItemId} onValueChange={setSelectedWarehouseItemId}>
-                <SelectTrigger className="h-11">
-                  <SelectValue placeholder="Pilih Barang Gudang" />
-                </SelectTrigger>
-                <SelectContent>
-                  {warehouseItems?.map(item => (
-                    <SelectItem key={item.id} value={item.id!.toString()}>
-                      {item.name} ({item.unit})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={warehouseComboboxOpen} onOpenChange={setWarehouseComboboxOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={warehouseComboboxOpen}
+                    className="h-11 w-full justify-between font-normal"
+                  >
+                    <span className="truncate">{selectedWarehouseItemLabel}</span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Cari barang gudang..." />
+                    <CommandList>
+                      <CommandEmpty>Barang gudang tidak ditemukan.</CommandEmpty>
+                      {sortedWarehouseRecipeItems.map(item => (
+                        <CommandItem
+                          key={item.id}
+                          value={`${item.name} ${item.unit} stok ${item.stock}`}
+                          onSelect={() => {
+                            setSelectedWarehouseItemId(item.id!.toString());
+                            setWarehouseComboboxOpen(false);
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              'mr-2 h-4 w-4',
+                              selectedWarehouseItemId === item.id!.toString() ? 'opacity-100' : 'opacity-0'
+                            )}
+                          />
+                          <span className="truncate">{item.name} ({item.unit})</span>
+                        </CommandItem>
+                      ))}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
 
             <div className="space-y-1.5">

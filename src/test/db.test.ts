@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { db, deleteDailyExpenseEntry, duplicateProduct, recordDailyExpense, recordWarehouseUsage, revertWarehouseUsageLog } from "@/lib/db";
+import { db, deleteDailyExpenseEntry, duplicateProduct, recordDailyExpense, recordWarehouseStockEntry, recordWarehouseUsage, revertWarehouseStockEntryGroup, revertWarehouseUsageLog } from "@/lib/db";
 
 describe("duplicateProduct", () => {
   beforeEach(async () => {
@@ -200,6 +200,7 @@ describe("daily operational records", () => {
   beforeEach(async () => {
     await db.dailyExpenses.clear();
     await db.warehouseUsageLogs.clear();
+    await db.warehouseStockEntryLogs.clear();
     await db.warehouseItems.clear();
   });
 
@@ -266,5 +267,100 @@ describe("daily operational records", () => {
 
     await expect(db.warehouseItems.get(itemId)).resolves.toMatchObject({ stock: 5 });
     await expect(db.warehouseUsageLogs.get(logId)).resolves.toBeUndefined();
+  });
+
+  it("adds warehouse stock in batches and stores grouped history logs", async () => {
+    const now = new Date();
+    const riceId = await db.warehouseItems.add({
+      name: "Beras",
+      stock: 3,
+      unit: "karung",
+      isCashierVisible: 0,
+      isDailyReset: 0,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const oilId = await db.warehouseItems.add({
+      name: "Minyak",
+      stock: 1,
+      unit: "dus",
+      isCashierVisible: 0,
+      isDailyReset: 0,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const groupId = await recordWarehouseStockEntry({
+      items: [
+        { warehouseItemId: riceId, quantity: 2 },
+        { warehouseItemId: oilId, quantity: 4 },
+        { warehouseItemId: riceId, quantity: 1 },
+      ],
+      note: "Belanja supplier pagi",
+      date: new Date("2026-06-24T12:00:00"),
+    });
+
+    await expect(db.warehouseItems.get(riceId)).resolves.toMatchObject({ stock: 6 });
+    await expect(db.warehouseItems.get(oilId)).resolves.toMatchObject({ stock: 5 });
+
+    const logs = await db.warehouseStockEntryLogs.where("entryGroupId").equals(groupId).toArray();
+    expect(logs).toHaveLength(2);
+    expect(logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          warehouseItemName: "Beras",
+          quantity: 3,
+          note: "Belanja supplier pagi",
+          source: "manual",
+        }),
+        expect.objectContaining({
+          warehouseItemName: "Minyak",
+          quantity: 4,
+          note: "Belanja supplier pagi",
+          source: "manual",
+        }),
+      ])
+    );
+  });
+
+  it("reverts warehouse stock entry batch and removes its history logs", async () => {
+    const now = new Date();
+    const riceId = await db.warehouseItems.add({
+      name: "Beras",
+      stock: 10,
+      unit: "karung",
+      isCashierVisible: 0,
+      isDailyReset: 0,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const oilId = await db.warehouseItems.add({
+      name: "Minyak",
+      stock: 5,
+      unit: "dus",
+      isCashierVisible: 0,
+      isDailyReset: 0,
+      isDeleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const groupId = await recordWarehouseStockEntry({
+      items: [
+        { warehouseItemId: riceId, quantity: 3 },
+        { warehouseItemId: oilId, quantity: 2 },
+      ],
+      note: "Belanja pagi",
+      date: new Date("2026-06-24T12:00:00"),
+    });
+
+    await revertWarehouseStockEntryGroup(groupId);
+
+    await expect(db.warehouseItems.get(riceId)).resolves.toMatchObject({ stock: 10 });
+    await expect(db.warehouseItems.get(oilId)).resolves.toMatchObject({ stock: 5 });
+    await expect(db.warehouseStockEntryLogs.where("entryGroupId").equals(groupId).toArray()).resolves.toEqual([]);
   });
 });

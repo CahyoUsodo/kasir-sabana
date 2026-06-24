@@ -57,6 +57,7 @@ const loadTransactionHistory = () => import("./pages/TransactionHistory");
 const loadStockReport = () => import("./pages/StockReport");
 const loadUsersPage = () => import("./pages/Users");
 const loadWarehousePage = () => import("./pages/Warehouse");
+const loadWarehouseStockEntryPage = () => import("./pages/WarehouseStockEntry");
 const loadDailyExpensesPage = () => import("./pages/DailyExpenses");
 const loadNotFound = () => import("./pages/NotFound");
 
@@ -72,6 +73,7 @@ const TransactionHistory = lazyWithChunkRecovery(loadTransactionHistory, "histor
 const StockReport = lazyWithChunkRecovery(loadStockReport, "stock-report");
 const UsersPage = lazyWithChunkRecovery(loadUsersPage, "users");
 const WarehousePage = lazyWithChunkRecovery(loadWarehousePage, "warehouse");
+const WarehouseStockEntryPage = lazyWithChunkRecovery(loadWarehouseStockEntryPage, "warehouse-stock-entry");
 const DailyExpensesPage = lazyWithChunkRecovery(loadDailyExpensesPage, "daily-expenses");
 const NotFound = lazyWithChunkRecovery(loadNotFound, "not-found");
 const PWA_UPDATE_TOAST_ID = "pwa-update-ready";
@@ -101,6 +103,18 @@ const App = () => {
         });
         await db.hppHistory.toCollection().modify((h: any) => {
           if (typeof h.date === 'string') h.date = new Date(h.date);
+        });
+        await db.dailyExpenses.toCollection().modify((entry: any) => {
+          if (typeof entry.date === 'string') entry.date = new Date(entry.date);
+          if (typeof entry.createdAt === 'string') entry.createdAt = new Date(entry.createdAt);
+        });
+        await db.warehouseUsageLogs.toCollection().modify((log: any) => {
+          if (typeof log.date === 'string') log.date = new Date(log.date);
+          if (typeof log.createdAt === 'string') log.createdAt = new Date(log.createdAt);
+        });
+        await db.warehouseStockEntryLogs.toCollection().modify((log: any) => {
+          if (typeof log.date === 'string') log.date = new Date(log.date);
+          if (typeof log.createdAt === 'string') log.createdAt = new Date(log.createdAt);
         });
         await repairInventoryAnomalies();
       } catch (e) {
@@ -180,6 +194,7 @@ const App = () => {
         loadReports(),
         loadTransactionHistory(),
         loadWarehousePage(),
+        loadWarehouseStockEntryPage(),
         loadDailyExpensesPage(),
         loadSettings(),
       ]);
@@ -225,6 +240,7 @@ const App = () => {
                   <Route path="/stock-report" element={<StockReport />} />
                   <Route path="/users" element={<UsersPage />} />
                   <Route path="/warehouse" element={<WarehousePage />} />
+                  <Route path="/warehouse/stock-entry" element={<WarehouseStockEntryPage />} />
                   <Route path="/daily-expenses" element={<DailyExpensesPage />} />
                 </Route>
                 <Route path="*" element={<NotFound />} />
