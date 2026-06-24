@@ -828,19 +828,21 @@ export default function WarehousePage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1 shrink-0 ml-3">
-                      <Button variant="ghost" size="icon" className="w-8 h-8 text-muted-foreground hover:text-foreground" onClick={() => openItemEdit(item)}>
-                        <Edit2 className="w-3.5 h-3.5" />
+                    <div className="flex items-center gap-1.5 shrink-0 ml-3">
+                      <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] gap-1 hover:bg-accent" onClick={() => openItemEdit(item)}>
+                        <Edit2 className="w-3 h-3 text-muted-foreground" />
+                        <span>Edit</span>
                       </Button>
                       <Button
-                        variant="ghost"
-                        size="icon"
-                        className="w-8 h-8 text-destructive hover:text-destructive/80 disabled:opacity-40"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-[10px] gap-1 text-destructive border-destructive/20 hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
                         onClick={() => deleteItem(item.id!)}
                         disabled={meta.isOutput}
                         title={meta.isOutput ? 'Hapus item output dari rumus persiapan terlebih dahulu' : 'Hapus barang'}
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-3 h-3" />
+                        <span>Hapus</span>
                       </Button>
                     </div>
                   </CardContent>
@@ -913,8 +915,9 @@ export default function WarehousePage() {
                               <span className="font-semibold text-muted-foreground">
                                 Mengurangi {r.quantity} {warehouseItem?.unit || 'pcs'}
                               </span>
-                              <Button variant="ghost" size="icon" className="w-7 h-7 text-destructive hover:bg-destructive/10" onClick={() => deleteRecipeLink(r.id!)}>
+                              <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] gap-1 text-destructive border-destructive/20 hover:bg-destructive/10 hover:text-destructive" onClick={() => deleteRecipeLink(r.id!)}>
                                 <Trash2 className="w-3 h-3" />
+                                <span>Hapus</span>
                               </Button>
                             </div>
                           </div>

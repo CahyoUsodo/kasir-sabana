@@ -44,6 +44,7 @@ export interface Category {
   name: string;
   color: string;
   icon: string;
+  sortOrder?: number;
   createdAt: Date;
   isDeleted: number; // 0 = active, 1 = deleted (IndexedDB can't index booleans)
   deletedAt: Date | null;

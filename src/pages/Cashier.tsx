@@ -81,7 +81,7 @@ export default function Kasir() {
   const [selectedOptionIds, setSelectedOptionIds] = useState<Record<number, number[]>>({});
 
   const products = useLiveQuery(() => db.products.where('isDeleted').equals(0).toArray());
-  const categories = useLiveQuery(() => db.categories.where('isDeleted').equals(0).toArray());
+  const categories = useLiveQuery(() => db.categories.where('isDeleted').equals(0).toArray().then(arr => [...arr].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.id ?? 0) - (b.id ?? 0))));
   const visibleWarehouseItems = useLiveQuery(() => db.warehouseItems.where('isDeleted').equals(0).toArray());
   const dailyPrepFormulas = useLiveQuery(() => db.dailyPrepFormulas.toArray());
   const paymentMethods = useLiveQuery(() => db.paymentMethods.toArray());

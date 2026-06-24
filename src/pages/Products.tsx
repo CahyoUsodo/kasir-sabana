@@ -64,7 +64,7 @@ export default function Produk() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const products = useLiveQuery(() => db.products.where('isDeleted').equals(0).toArray());
-  const categories = useLiveQuery(() => db.categories.where('isDeleted').equals(0).toArray());
+  const categories = useLiveQuery(() => db.categories.where('isDeleted').equals(0).toArray().then(arr => [...arr].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.id ?? 0) - (b.id ?? 0))));
   const units = useLiveQuery(() => db.units.where('isDeleted').equals(0).toArray());
   const productRecipes = useLiveQuery(() => db.productRecipes.toArray());
   const productOptionGroups = useLiveQuery(() => db.productOptionGroups.toArray());
@@ -747,72 +747,78 @@ export default function Produk() {
                   const optionCount = getProductOptionCount(p.id);
 
                   return (
-                <div className="flex items-start gap-3">
-                  {/* Product thumbnail */}
-                  <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center shrink-0 overflow-hidden">
-                    {getDisplayPhotoForProduct(p) ? (
-                      <img src={getDisplayPhotoForProduct(p)} alt={p.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <PackageIcon className="w-5 h-5 text-muted-foreground/40" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-semibold truncate">{p.name}</h3>
-                      <Badge variant="outline" className="text-[10px] shrink-0" style={{ borderColor: getCategoryColor(p.categoryId), color: getCategoryColor(p.categoryId) }}>
-                        {getCategoryName(p.categoryId)}
-                      </Badge>
-                      {hasRecipe && (
-                        <Badge className="text-[10px] shrink-0 bg-amber-100 text-amber-700 hover:bg-amber-100">
-                          Stok Otomatis
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    {/* Product thumbnail */}
+                    <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center shrink-0 overflow-hidden">
+                      {getDisplayPhotoForProduct(p) ? (
+                        <img src={getDisplayPhotoForProduct(p)} alt={p.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <PackageIcon className="w-5 h-5 text-muted-foreground/40" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-sm font-semibold truncate">{p.name}</h3>
+                        <Badge variant="outline" className="text-[10px] shrink-0" style={{ borderColor: getCategoryColor(p.categoryId), color: getCategoryColor(p.categoryId) }}>
+                          {getCategoryName(p.categoryId)}
                         </Badge>
+                        {hasRecipe && (
+                          <Badge className="text-[10px] shrink-0 bg-amber-100 text-amber-700 hover:bg-amber-100">
+                            Stok Otomatis
+                          </Badge>
+                        )}
+                        {hasOptions && (
+                          <Badge className="text-[10px] shrink-0 bg-sky-100 text-sky-700 hover:bg-sky-100">
+                            Paket/Opsi
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">SKU: {p.sku || '-'}</p>
+                      {p.description && (
+                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 whitespace-pre-line">
+                          {p.description}
+                        </p>
                       )}
-                      {hasOptions && (
-                        <Badge className="text-[10px] shrink-0 bg-sky-100 text-sky-700 hover:bg-sky-100">
-                          Paket/Opsi
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">SKU: {p.sku || '-'}</p>
-                    {p.description && (
-                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 whitespace-pre-line">
-                        {p.description}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-3 mt-1.5">
-                      <span className="text-sm font-bold text-primary">Rp {p.price.toLocaleString('id-ID')}</span>
-                      <span className="text-xs text-muted-foreground">HPP: Rp {p.hpp.toLocaleString('id-ID')}</span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className={cn('text-xs font-medium px-1.5 py-0.5 rounded', p.stock <= 5 ? 'bg-destructive/10 text-destructive' : 'bg-success/10 text-success')}>
-                        Stok: {p.stock} {p.unit}
-                      </span>
-                      {hasRecipe && (
-                        <span className="text-[11px] text-muted-foreground">
-                          {recipeCount} bahan resep
+                      <div className="flex items-center gap-3 mt-1.5">
+                        <span className="text-sm font-bold text-primary">Rp {p.price.toLocaleString('id-ID')}</span>
+                        <span className="text-xs text-muted-foreground">HPP: Rp {p.hpp.toLocaleString('id-ID')}</span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className={cn('text-xs font-medium px-1.5 py-0.5 rounded', p.stock <= 5 ? 'bg-destructive/10 text-destructive' : 'bg-success/10 text-success')}>
+                          Stok: {p.stock} {p.unit}
                         </span>
-                      )}
-                      {hasOptions && (
-                        <span className="text-[11px] text-muted-foreground">
-                          {optionGroupCount} grup • {optionCount} opsi
-                        </span>
-                      )}
+                        {hasRecipe && (
+                          <span className="text-[11px] text-muted-foreground">
+                            {recipeCount} bahan resep
+                          </span>
+                        )}
+                        {hasOptions && (
+                          <span className="text-[11px] text-muted-foreground">
+                            {optionGroupCount} grup • {optionCount} opsi
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-1 shrink-0">
+                  <div className="grid grid-cols-2 gap-1.5 shrink-0 w-full sm:w-[210px]">
                     {canManage ? (
                       <>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Edit ${p.name}`} onClick={() => openEdit(p)}>
-                          <Edit2 className="w-3.5 h-3.5" />
+                        <Button variant="outline" size="sm" className="w-full h-8 px-2.5 text-[10.5px] font-medium gap-1.5 justify-start hover:bg-accent" aria-label={`Edit ${p.name}`} onClick={() => openEdit(p)}>
+                          <Edit2 className="w-3.5 h-3.5 text-muted-foreground" />
+                          <span>Edit</span>
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Duplikat ${p.name}`} onClick={() => handleDuplicate(p)}>
-                          <Copy className="w-3.5 h-3.5" />
+                        <Button variant="outline" size="sm" className="w-full h-8 px-2.5 text-[10.5px] font-medium gap-1.5 justify-start hover:bg-accent" aria-label={`Opsi ${p.name}`} onClick={() => openOptions(p)}>
+                          <Settings2 className="w-3.5 h-3.5 text-muted-foreground" />
+                          <span>Opsi</span>
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Opsi ${p.name}`} onClick={() => openOptions(p)}>
-                          <Settings2 className="w-3.5 h-3.5" />
+                        <Button variant="outline" size="sm" className="w-full h-8 px-2.5 text-[10.5px] font-medium gap-1.5 justify-start hover:bg-accent" aria-label={`Duplikat ${p.name}`} onClick={() => handleDuplicate(p)}>
+                          <Copy className="w-3.5 h-3.5 text-muted-foreground" />
+                          <span>Duplikat</span>
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" aria-label={`Hapus ${p.name}`} onClick={() => setDeleteId(p.id!)}>
+                        <Button variant="outline" size="sm" className="w-full h-8 px-2.5 text-[10.5px] font-medium gap-1.5 justify-start text-destructive border-destructive/20 hover:bg-destructive/10 hover:text-destructive" aria-label={`Hapus ${p.name}`} onClick={() => setDeleteId(p.id!)}>
                           <Trash2 className="w-3.5 h-3.5" />
+                          <span>Hapus</span>
                         </Button>
                       </>
                     ) : null}

@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type PaymentMethod, type Category, type Unit } from '@/lib/db';
 import { useState, useEffect, useRef } from 'react';
-import { Settings, Store, CreditCard, Tag, Download, Upload, Plus, Trash2, Edit2, Info, Truck, ChevronRight, Receipt, Palette, HardDrive, Camera, X, Ruler, Users as UsersIcon, ShieldCheck, LogOut, Smartphone, CheckCircle2, Globe, Share2, CloudUpload, CloudDownload, KeyRound, Warehouse, DollarSign, RefreshCw } from 'lucide-react';
+import { Settings, Store, CreditCard, Tag, Download, Upload, Plus, Trash2, Edit2, Info, Truck, ChevronRight, ChevronUp, ChevronDown, Receipt, Palette, HardDrive, Camera, X, Ruler, Users as UsersIcon, ShieldCheck, LogOut, Smartphone, CheckCircle2, Globe, Share2, CloudUpload, CloudDownload, KeyRound, Warehouse, DollarSign, RefreshCw } from 'lucide-react';
 import ThemeColorPicker from '@/components/ThemeColorPicker';
 import { setThemeColor } from '@/hooks/use-theme-color';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -45,7 +45,7 @@ export default function Pengaturan() {
 
   const storeSettings = useLiveQuery(() => db.storeSettings.toCollection().first());
   const paymentMethods = useLiveQuery(() => db.paymentMethods.toArray());
-  const categories = useLiveQuery(() => db.categories.where('isDeleted').equals(0).toArray());
+  const categories = useLiveQuery(() => db.categories.where('isDeleted').equals(0).toArray().then(arr => [...arr].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.id ?? 0) - (b.id ?? 0))));
   const usersCount = useLiveQuery(() => db.users.count());
   const units = useLiveQuery(() => db.units.where('isDeleted').equals(0).toArray());
 
@@ -625,11 +625,41 @@ export default function Pengaturan() {
   const saveCat = async () => {
     if (!catName.trim()) return;
     if (catEditId) await db.categories.update(catEditId, { name: catName.trim(), icon: catIcon, color: catColor });
-    else await db.categories.add({ name: catName.trim(), icon: catIcon, color: catColor, createdAt: new Date(), isDeleted: 0, deletedAt: null });
+    else {
+      const activeCats = await db.categories.where('isDeleted').equals(0).toArray();
+      const maxOrder = activeCats.reduce((max, c) => Math.max(max, c.sortOrder ?? 0), 0);
+      await db.categories.add({ name: catName.trim(), icon: catIcon, color: catColor, sortOrder: maxOrder + 1, createdAt: new Date(), isDeleted: 0, deletedAt: null });
+    }
     setCatDialog(false);
     toast.success('Kategori disimpan');
   };
   const deleteCat = async (id: number) => { await db.categories.update(id, { isDeleted: 1, deletedAt: new Date() }); toast.success('Dihapus'); };
+  const moveCategory = async (index: number, direction: 'up' | 'down') => {
+    if (!categories) return;
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= categories.length) return;
+
+    const currentCat = categories[index];
+    const targetCat = categories[targetIndex];
+
+    if (!currentCat.id || !targetCat.id) return;
+
+    try {
+      await db.transaction('rw', db.categories, async () => {
+        for (let i = 0; i < categories.length; i++) {
+          const cat = categories[i];
+          if (cat.sortOrder === undefined || cat.sortOrder !== i) {
+            await db.categories.update(cat.id!, { sortOrder: i });
+          }
+        }
+        await db.categories.update(currentCat.id!, { sortOrder: targetIndex });
+        await db.categories.update(targetCat.id!, { sortOrder: index });
+      });
+    } catch (err) {
+      console.error(err);
+      toast.error('Gagal memindahkan kategori');
+    }
+  };
 
   const openUnitAdd = () => {
     setUnitEditId(null);
@@ -873,13 +903,19 @@ export default function Pengaturan() {
           </div>
         </CardHeader>
         <CardContent className="space-y-1">
-          {categories?.map(c => (
+          {categories?.map((c, index) => (
             <div key={c.id} className="flex items-center justify-between py-1.5">
               <div className="flex items-center gap-2">
                 <span className="w-6 h-6 rounded flex items-center justify-center text-sm" style={{ backgroundColor: c.color + '20' }}>{c.icon}</span>
                 <span className="text-sm font-medium">{c.name}</span>
               </div>
               <div className="flex gap-1">
+                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={index === 0} onClick={() => moveCategory(index, 'up')}>
+                  <ChevronUp className="w-3.5 h-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={index === categories.length - 1} onClick={() => moveCategory(index, 'down')}>
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </Button>
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openCatEdit(c)}><Edit2 className="w-3 h-3" /></Button>
                 <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteCat(c.id!)}><Trash2 className="w-3 h-3" /></Button>
               </div>
