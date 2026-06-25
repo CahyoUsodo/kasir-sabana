@@ -1752,3 +1752,74 @@ export async function duplicateProduct(productId: number, currentUserId?: number
   return newProductId;
 }
 
+export async function syncHistoricalHppAndProfit() {
+  return db.transaction('rw', [db.transactionItems, db.transactions, db.products, db.productOptions, db.productOptionGroups], async () => {
+    // 1. Get all products, options, groups
+    const products = await db.products.toArray();
+    const productMap = new Map(products.map(p => [p.id!, p]));
+
+    const options = await db.productOptions.toArray();
+    const optionMap = new Map(options.map(o => [o.id!, o]));
+
+    const groups = await db.productOptionGroups.toArray();
+    const groupMap = new Map(groups.map(g => [g.id!, g]));
+
+    // Map to accumulate total HPP per transactionId
+    const txTotalHpp = new Map<number, number>();
+
+    // 2. Iterate and update all transaction items
+    await db.transactionItems.toCollection().modify((item: TransactionItemRecord) => {
+      const product = productMap.get(item.productId);
+      if (!product) {
+        // If product is hard-deleted, keep existing item HPP but accumulate it
+        const txId = item.transactionId;
+        const currentHppSum = txTotalHpp.get(txId) || 0;
+        txTotalHpp.set(txId, currentHppSum + ((item.hpp || 0) * item.quantity));
+        return;
+      }
+
+      let newItemHpp = product.hpp;
+
+      if (item.selectedOptions && item.selectedOptions.length > 0) {
+        const overrideOptions: CartOptionSnapshot[] = [];
+        const additiveOptions: CartOptionSnapshot[] = [];
+
+        item.selectedOptions.forEach(opt => {
+          const dbOpt = optionMap.get(opt.optionId);
+          const dbGroup = groupMap.get(opt.groupId);
+
+          const hppDelta = dbOpt ? (dbOpt.hppDelta ?? 0) : (opt.hppDelta ?? 0);
+          const groupPricingMode = dbGroup ? (dbGroup.pricingMode || 'add') : (opt.groupPricingMode || 'add');
+
+          // Build option snapshot with updated hppDelta
+          const resolvedOpt = { ...opt, hppDelta, groupPricingMode };
+          if (groupPricingMode === 'override') {
+            overrideOptions.push(resolvedOpt);
+          } else {
+            additiveOptions.push(resolvedOpt);
+          }
+        });
+
+        const hppDeltaSum = additiveOptions.reduce((sum, option) => sum + option.hppDelta, 0);
+        const overrideHppSum = overrideOptions.reduce((sum, option) => sum + option.hppDelta, 0);
+        const baseHpp = overrideOptions.length > 0 ? overrideHppSum : product.hpp;
+        newItemHpp = baseHpp + hppDeltaSum;
+      }
+
+      item.hpp = newItemHpp;
+
+      // Accumulate total HPP for this transaction
+      const txId = item.transactionId;
+      const currentHppSum = txTotalHpp.get(txId) || 0;
+      txTotalHpp.set(txId, currentHppSum + (newItemHpp * item.quantity));
+    });
+
+    // 3. Update transactions profit
+    await db.transactions.toCollection().modify((t: Transaction) => {
+      const totalHpp = txTotalHpp.get(t.id!) || 0;
+      t.profit = t.total - totalHpp;
+    });
+  });
+}
+
+

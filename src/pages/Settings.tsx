@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type PaymentMethod, type Category, type Unit } from '@/lib/db';
+import { db, type PaymentMethod, type Category, type Unit, syncHistoricalHppAndProfit } from '@/lib/db';
 import { useState, useEffect, useRef } from 'react';
 import { Settings, Store, CreditCard, Tag, Download, Upload, Plus, Trash2, Edit2, Info, Truck, ChevronRight, ChevronUp, ChevronDown, Receipt, Palette, HardDrive, Camera, X, Ruler, Users as UsersIcon, ShieldCheck, LogOut, Smartphone, CheckCircle2, Globe, Share2, CloudUpload, CloudDownload, KeyRound, Warehouse, DollarSign, RefreshCw } from 'lucide-react';
 import ThemeColorPicker from '@/components/ThemeColorPicker';
@@ -127,6 +127,10 @@ export default function Pengaturan() {
   const [pinVerifyDesc, setPinVerifyDesc] = useState('Masukkan PIN keamanan 6 angka untuk menyetujui tindakan ini.');
   const pinCallbackRef = useRef<(() => void) | null>(null);
 
+  // HPP & Profit sync states
+  const [isSyncingHpp, setIsSyncingHpp] = useState(false);
+  const [syncHppConfirmOpen, setSyncHppConfirmOpen] = useState(false);
+
   useEffect(() => {
     if (storeSettings?.googleDriveFileId !== undefined) {
       setTempFileId(storeSettings.googleDriveFileId || '');
@@ -144,6 +148,30 @@ export default function Pengaturan() {
     } else {
       action();
     }
+  };
+
+  const handleSyncHppAndProfit = () => {
+    setSyncHppConfirmOpen(true);
+  };
+
+  const confirmSyncHppAndProfit = () => {
+    runWithPinGate(
+      async () => {
+        setIsSyncingHpp(true);
+        try {
+          await syncHistoricalHppAndProfit();
+          toast.success('HPP dan Laba transaksi lama berhasil disinkronisasi!');
+        } catch (error: any) {
+          console.error('Error syncing HPP/profit:', error);
+          toast.error(error.message || 'Gagal menyinkronisasi HPP dan Laba');
+        } finally {
+          setIsSyncingHpp(false);
+          setSyncHppConfirmOpen(false);
+        }
+      },
+      'Verifikasi PIN Sinkronisasi',
+      'Masukkan PIN keamanan 6 angka untuk menyetujui sinkronisasi HPP dan Laba transaksi.'
+    );
   };
 
   const handleAppRefresh = async () => {
@@ -865,6 +893,27 @@ export default function Pengaturan() {
             </CardContent>
           </Card>
         </Link>
+        {can('manage_store_settings') && (
+          <Card 
+            className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+            onClick={isSyncingHpp ? undefined : handleSyncHppAndProfit}
+          >
+            <CardContent className="p-3 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                <RefreshCw className={`w-4 h-4 ${isSyncingHpp ? 'animate-spin' : ''}`} />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold">Sinkronisasi HPP & Laba</p>
+                <p className="text-[10px] text-muted-foreground">Perbarui HPP dan laba transaksi lama sesuai HPP produk saat ini</p>
+              </div>
+              {isSyncingHpp ? (
+                <span className="text-xs text-muted-foreground animate-pulse">Memproses...</span>
+              ) : (
+                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Payment Methods */}
@@ -1456,6 +1505,24 @@ export default function Pengaturan() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog open={syncHppConfirmOpen} onOpenChange={setSyncHppConfirmOpen}>
+        <AlertDialogContent className="max-w-[90vw] rounded-xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sinkronisasi HPP & Laba?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tindakan ini akan menghitung ulang HPP dan laba pada seluruh transaksi lama berdasarkan HPP produk saat ini. Perubahan ini bersifat permanen pada laporan penjualan lama.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmSyncHppAndProfit}>
+              Lanjut Sinkronisasi
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* PIN Verification for actions in Settings */}
       <PinVerificationDialog
         open={pinVerifyOpen}
