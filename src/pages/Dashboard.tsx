@@ -12,11 +12,13 @@ import { useAuth } from '@/hooks/use-auth';
 import type { PermissionKey } from '@/lib/db';
 import { performBackup } from '@/lib/backup';
 import { toast } from 'sonner';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 export default function Dashboard() {
   const { can } = useAuth();
   const [backupDismissed, setBackupDismissed] = useState(false);
   const [isCloudBackuping, setIsCloudBackuping] = useState(false);
+  const [showAllLowStock, setShowAllLowStock] = useState(false);
 
   const storeSettings = useLiveQuery(() => db.storeSettings.toCollection().first());
 
@@ -219,10 +221,22 @@ export default function Dashboard() {
       {/* Low Stock Alert */}
       {lowStockProducts && lowStockProducts.length > 0 && (
         <div>
-          <h2 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
-            <AlertTriangle className="w-4 h-4 text-warning" />
-            Stok Menipis
-          </h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-muted-foreground flex items-center gap-1.5">
+              <AlertTriangle className="w-4 h-4 text-warning" />
+              Stok Menipis
+            </h2>
+            {lowStockProducts.length > 5 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1 text-primary"
+                onClick={() => setShowAllLowStock(true)}
+              >
+                Lihat Semua <ChevronRight className="w-3 h-3" />
+              </Button>
+            )}
+          </div>
           <div className="space-y-2">
             {lowStockProducts.slice(0, 5).map(product => (
               <Link key={product.id} to={`/products?productId=${product.id.replace('product-', '')}`}>
@@ -239,6 +253,36 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Dialog for all low stock products */}
+      <Dialog open={showAllLowStock} onOpenChange={setShowAllLowStock}>
+        <DialogContent className="max-w-[95vw] sm:max-w-[480px] rounded-xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
+              <AlertTriangle className="w-4 h-4 text-warning" />
+              Semua Stok Menipis ({lowStockProducts?.length || 0})
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 mt-2">
+            {lowStockProducts?.map(product => (
+              <Link
+                key={product.id}
+                to={`/products?productId=${product.id.replace('product-', '')}`}
+                onClick={() => setShowAllLowStock(false)}
+              >
+                <Card className="border-0 shadow-sm hover:shadow-md transition-shadow mb-2">
+                  <CardContent className="p-3 flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium">{product.name}</span>
+                    <span className="text-xs font-bold text-destructive bg-destructive/10 px-2 py-1 rounded-full shrink-0">
+                      {`Sisa ${product.stock} ${product.unit}`}
+                    </span>
+                  </CardContent>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
