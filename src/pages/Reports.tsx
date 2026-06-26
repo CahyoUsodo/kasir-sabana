@@ -1,4 +1,4 @@
-﻿import { useLiveQuery } from 'dexie-react-hooks';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Transaction, type TransactionItemRecord } from '@/lib/db';
 import { useState } from 'react';
 import { BarChart3, TrendingUp, ShoppingCart, Package, DollarSign, ArrowDown, ArrowUp, Minus, Download, PackageMinus } from 'lucide-react';
@@ -76,6 +76,21 @@ export default function Laporan() {
     const since = getPresetStartDate();
     return db.dailyExpenses.where('date').aboveOrEqual(since).toArray();
   }, [days, period, dateFrom, dateTo]);
+  const warehouseStockEntryLogs = useLiveQuery(async () => {
+    if (period === 'custom') {
+      if (dateFrom && dateTo) {
+        return db.warehouseStockEntryLogs.where('date').between(startOfDay(dateFrom), endOfDay(dateTo), true, true).toArray();
+      } else if (dateFrom) {
+        return db.warehouseStockEntryLogs.where('date').aboveOrEqual(startOfDay(dateFrom)).toArray();
+      } else if (dateTo) {
+        return db.warehouseStockEntryLogs.where('date').belowOrEqual(endOfDay(dateTo)).toArray();
+      }
+      return [];
+    }
+
+    const since = getPresetStartDate();
+    return db.warehouseStockEntryLogs.where('date').aboveOrEqual(since).toArray();
+  }, [days, period, dateFrom, dateTo]);
   const warehouseUsageLogs = useLiveQuery(async () => {
     if (period === 'custom') {
       if (dateFrom && dateTo) {
@@ -108,8 +123,16 @@ export default function Laporan() {
   const netSales = totalRevenue - totalDiscount; // same as totalSales
   const grossProfit = netSales - totalHpp;
   const marginPercent = netSales > 0 ? (grossProfit / netSales * 100) : 0;
-  const totalOperationalExpenses = (dailyExpenses ?? []).reduce((sum, item) => sum + item.amount, 0);
-  const netProfitAfterExpenses = grossProfit - totalOperationalExpenses;
+  const totalOperationalExpenses = (dailyExpenses ?? [])
+    .filter(item => !item.type || item.type === 'operational')
+    .reduce((sum, item) => sum + item.amount, 0);
+  const totalSalaryExpenses = (dailyExpenses ?? [])
+    .filter(item => item.type === 'salary')
+    .reduce((sum, item) => sum + item.amount, 0);
+  const totalRentExpenses = (dailyExpenses ?? [])
+    .filter(item => item.type === 'rent')
+    .reduce((sum, item) => sum + item.amount, 0);
+  const netProfitAfterExpenses = grossProfit - totalOperationalExpenses - totalRentExpenses - totalSalaryExpenses;
   const serviceTypeBreakdown = (transactions ?? []).reduce<Record<'dine_in' | 'take_away', { count: number; total: number }>>((acc, tx) => {
     const serviceType = tx.serviceType === 'take_away' ? 'take_away' : 'dine_in';
     acc[serviceType].count += 1;
@@ -142,9 +165,10 @@ export default function Laporan() {
   };
 
   const paymentMethodById = new Map((paymentMethods ?? []).filter(pm => pm.id).map(pm => [pm.id!, pm]));
-  const getPaymentBucket = (paymentMethodId: number): 'cash' | 'qris' | 'other' => {
+  const getPaymentBucket = (paymentMethodId: number): 'cash' | 'qris' | 'gojek' | 'other' => {
     const method = paymentMethodById.get(paymentMethodId);
     const normalized = `${method?.name ?? ''} ${method?.category ?? ''}`.toLowerCase();
+    if (normalized.includes('gojek')) return 'gojek';
     if (normalized.includes('qris')) return 'qris';
     if (normalized.includes('tunai') || normalized.includes('cash')) return 'cash';
     return 'other';
@@ -154,6 +178,7 @@ export default function Laporan() {
     const base = {
       cash: { txCount: 0, gross: 0, discount: 0, net: 0, hpp: 0, grossProfit: 0 },
       qris: { txCount: 0, gross: 0, discount: 0, net: 0, hpp: 0, grossProfit: 0 },
+      gojek: { txCount: 0, gross: 0, discount: 0, net: 0, hpp: 0, grossProfit: 0 },
       other: { txCount: 0, gross: 0, discount: 0, net: 0, hpp: 0, grossProfit: 0 },
       total: { txCount, gross: totalRevenue, discount: totalDiscount, net: netSales, hpp: totalHpp, grossProfit },
     };
@@ -175,7 +200,7 @@ export default function Laporan() {
       base[bucket].hpp += item.hpp * item.quantity;
     });
 
-    (['cash', 'qris', 'other'] as const).forEach(bucket => {
+    (['cash', 'qris', 'gojek', 'other'] as const).forEach(bucket => {
       base[bucket].grossProfit = base[bucket].net - base[bucket].hpp;
     });
 
@@ -189,6 +214,7 @@ export default function Laporan() {
       label: 'Transaksi',
       cash: paymentSummary.cash.txCount.toLocaleString('id-ID'),
       qris: paymentSummary.qris.txCount.toLocaleString('id-ID'),
+      gojek: paymentSummary.gojek.txCount.toLocaleString('id-ID'),
       total: paymentSummary.total.txCount.toLocaleString('id-ID'),
       tone: 'neutral',
     },
@@ -196,6 +222,7 @@ export default function Laporan() {
       label: 'Pendapatan Kotor',
       cash: rp(paymentSummary.cash.gross),
       qris: rp(paymentSummary.qris.gross),
+      gojek: rp(paymentSummary.gojek.gross),
       total: rp(paymentSummary.total.gross),
       tone: 'default',
     },
@@ -203,6 +230,7 @@ export default function Laporan() {
       label: 'Diskon',
       cash: paymentSummary.cash.discount > 0 ? `-${rp(paymentSummary.cash.discount)}` : 'Rp 0',
       qris: paymentSummary.qris.discount > 0 ? `-${rp(paymentSummary.qris.discount)}` : 'Rp 0',
+      gojek: paymentSummary.gojek.discount > 0 ? `-${rp(paymentSummary.gojek.discount)}` : 'Rp 0',
       total: paymentSummary.total.discount > 0 ? `-${rp(paymentSummary.total.discount)}` : 'Rp 0',
       tone: 'danger',
     },
@@ -210,6 +238,7 @@ export default function Laporan() {
       label: 'Penjualan Bersih',
       cash: rp(paymentSummary.cash.net),
       qris: rp(paymentSummary.qris.net),
+      gojek: rp(paymentSummary.gojek.net),
       total: rp(paymentSummary.total.net),
       tone: 'defaultStrong',
     },
@@ -217,6 +246,7 @@ export default function Laporan() {
       label: 'HPP (Modal)',
       cash: paymentSummary.cash.hpp > 0 ? `-${rp(paymentSummary.cash.hpp)}` : 'Rp 0',
       qris: paymentSummary.qris.hpp > 0 ? `-${rp(paymentSummary.qris.hpp)}` : 'Rp 0',
+      gojek: paymentSummary.gojek.hpp > 0 ? `-${rp(paymentSummary.gojek.hpp)}` : 'Rp 0',
       total: paymentSummary.total.hpp > 0 ? `-${rp(paymentSummary.total.hpp)}` : 'Rp 0',
       tone: 'danger',
     },
@@ -224,20 +254,39 @@ export default function Laporan() {
       label: 'Laba Kotor',
       cash: rp(paymentSummary.cash.grossProfit),
       qris: rp(paymentSummary.qris.grossProfit),
+      gojek: rp(paymentSummary.gojek.grossProfit),
       total: rp(paymentSummary.total.grossProfit),
       tone: 'success',
     },
     {
-      label: 'Pengeluaran Operasional',
+      label: 'Pengeluaran Operasional Harian',
       cash: totalOperationalExpenses > 0 ? `-${rp(totalOperationalExpenses)}` : 'Rp 0',
       qris: '-',
+      gojek: '-',
       total: totalOperationalExpenses > 0 ? `-${rp(totalOperationalExpenses)}` : 'Rp 0',
+      tone: 'danger',
+    },
+    {
+      label: 'Pengeluaran Sewa Ruko',
+      cash: '-',
+      qris: '-',
+      gojek: '-',
+      total: totalRentExpenses > 0 ? `-${rp(totalRentExpenses)}` : 'Rp 0',
+      tone: 'danger',
+    },
+    {
+      label: 'Pengeluaran Gaji',
+      cash: '-',
+      qris: '-',
+      gojek: '-',
+      total: totalSalaryExpenses > 0 ? `-${rp(totalSalaryExpenses)}` : 'Rp 0',
       tone: 'danger',
     },
     {
       label: 'Kas Tunai Setelah Operasional',
       cash: rp(cashAfterOperationalExpenses),
       qris: '-',
+      gojek: '-',
       total: rp(cashAfterOperationalExpenses),
       tone: 'cashStrong',
     },
@@ -245,6 +294,7 @@ export default function Laporan() {
       label: 'Laba Bersih',
       cash: '-',
       qris: '-',
+      gojek: '-',
       total: rp(netProfitAfterExpenses),
       tone: 'successStrong',
     },
@@ -252,6 +302,7 @@ export default function Laporan() {
       label: 'Margin',
       cash: '-',
       qris: '-',
+      gojek: '-',
       total: `${marginPercent.toFixed(1)}%`,
       tone: 'neutral',
     },
@@ -518,6 +569,12 @@ export default function Laporan() {
   }, {});
 
   const recentExpenses = [...(dailyExpenses ?? [])]
+    .filter(item => !item.type || item.type === 'operational')
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, 6);
+
+  const recentSalaries = [...(dailyExpenses ?? [])]
+    .filter(item => item.type === 'salary')
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, 6);
 
@@ -700,7 +757,9 @@ export default function Laporan() {
       { label: 'Penjualan Bersih', val: netSales, fmt: currencyFormat },
       { label: 'HPP (Modal)', val: totalHpp, fmt: currencyFormat },
       { label: 'Profit (Laba Kotor)', val: grossProfit, fmt: currencyFormat },
-      { label: 'Pengeluaran Operasional', val: totalOperationalExpenses, fmt: currencyFormat },
+      { label: 'Pengeluaran Operasional Harian', val: totalOperationalExpenses, fmt: currencyFormat },
+      { label: 'Pengeluaran Sewa Ruko', val: totalRentExpenses, fmt: currencyFormat },
+      { label: 'Pengeluaran Gaji', val: totalSalaryExpenses, fmt: currencyFormat },
       { label: 'Laba Bersih', val: netProfitAfterExpenses, fmt: currencyFormat },
       { label: 'Margin', val: marginPercent / 100, fmt: percentFormat }
     ];
@@ -912,7 +971,7 @@ export default function Laporan() {
 
     const cashRows = [
       { label: 'Tunai Bersih', value: paymentSummary.cash.net, emphasized: false },
-      { label: 'Pengeluaran Operasional', value: totalOperationalExpenses, emphasized: false },
+      { label: 'Pengeluaran Operasional Harian', value: totalOperationalExpenses, emphasized: false },
       { label: 'Kas Tunai Setelah Operasional', value: cashAfterOperationalExpenses, emphasized: true },
     ];
 
@@ -1311,9 +1370,9 @@ export default function Laporan() {
     });
 
     // ============================================
-    // SHEET 6: Pengeluaran Harian
+    // SHEET 6: Pengeluaran Operasional Harian
     // ============================================
-    const wsPengeluaran = wb.addWorksheet('Pengeluaran Harian', { views: [{ state: 'frozen', ySplit: 1 }] });
+    const wsPengeluaran = wb.addWorksheet('Pengeluaran Operasional Harian', { views: [{ state: 'frozen', ySplit: 1 }] });
     wsPengeluaran.columns = [
       { header: 'No', key: 'no', width: 6 },
       { header: 'Tanggal Kejadian', key: 'date', width: 18 },
@@ -1326,7 +1385,8 @@ export default function Laporan() {
     });
     wsPengeluaran.autoFilter = 'A1:E1';
 
-    (dailyExpenses ?? []).forEach((expense, index) => {
+    const operationalExpenses = (dailyExpenses ?? []).filter(expense => !expense.type || expense.type === 'operational');
+    operationalExpenses.forEach((expense, index) => {
       const row = wsPengeluaran.addRow({
         no: index + 1,
         date: format(new Date(expense.date), 'dd-MM-yyyy', { locale: localeId }),
@@ -1350,7 +1410,87 @@ export default function Laporan() {
     });
 
     // ============================================
-    // SHEET 7: Pemakaian Stok Barang
+    // SHEET 7: Pengeluaran Gaji
+    // ============================================
+    const wsGaji = wb.addWorksheet('Pengeluaran Gaji', { views: [{ state: 'frozen', ySplit: 1 }] });
+    wsGaji.columns = [
+      { header: 'No', key: 'no', width: 6 },
+      { header: 'Tanggal Kejadian', key: 'date', width: 18 },
+      { header: 'Diinput', key: 'createdAt', width: 22 },
+      { header: 'Detail Gaji / Nama Karyawan', key: 'purpose', width: 38 },
+      { header: 'Nominal', key: 'amount', width: 18, style: { numFmt: currencyFormat } },
+    ];
+    wsGaji.getRow(1).eachCell(cell => {
+      cell.style = headerStyle;
+    });
+    wsGaji.autoFilter = 'A1:E1';
+
+    const salaryExpenses = (dailyExpenses ?? []).filter(expense => expense.type === 'salary');
+    salaryExpenses.forEach((expense, index) => {
+      const row = wsGaji.addRow({
+        no: index + 1,
+        date: format(new Date(expense.date), 'dd-MM-yyyy', { locale: localeId }),
+        createdAt: format(new Date(expense.createdAt), 'dd-MM-yyyy HH:mm', { locale: localeId }),
+        purpose: expense.purpose,
+        amount: expense.amount,
+      });
+      row.eachCell(cell => { cell.border = cellBorder; });
+    });
+
+    const salaryTotalRow = wsGaji.addRow({
+      no: 'Total',
+      amount: totalSalaryExpenses,
+    });
+    wsGaji.mergeCells(`A${salaryTotalRow.number}:D${salaryTotalRow.number}`);
+    salaryTotalRow.getCell('A').alignment = { horizontal: 'right', vertical: 'middle' };
+    salaryTotalRow.eachCell(cell => {
+      cell.border = cellBorder;
+      cell.font = { bold: true };
+      cell.fill = subtotalFill;
+    });
+
+    // ============================================
+    // SHEET 8: Pengeluaran Sewa Ruko
+    // ============================================
+    const wsSewaRuko = wb.addWorksheet('Pengeluaran Sewa Ruko', { views: [{ state: 'frozen', ySplit: 1 }] });
+    wsSewaRuko.columns = [
+      { header: 'No', key: 'no', width: 6 },
+      { header: 'Tanggal Kejadian', key: 'date', width: 18 },
+      { header: 'Diinput', key: 'createdAt', width: 22 },
+      { header: 'Detail Sewa Ruko', key: 'purpose', width: 38 },
+      { header: 'Nominal', key: 'amount', width: 18, style: { numFmt: currencyFormat } },
+    ];
+    wsSewaRuko.getRow(1).eachCell(cell => {
+      cell.style = headerStyle;
+    });
+    wsSewaRuko.autoFilter = 'A1:E1';
+
+    const rentExpenses = (dailyExpenses ?? []).filter(expense => expense.type === 'rent');
+    rentExpenses.forEach((expense, index) => {
+      const row = wsSewaRuko.addRow({
+        no: index + 1,
+        date: format(new Date(expense.date), 'dd-MM-yyyy', { locale: localeId }),
+        createdAt: format(new Date(expense.createdAt), 'dd-MM-yyyy HH:mm', { locale: localeId }),
+        purpose: expense.purpose,
+        amount: expense.amount,
+      });
+      row.eachCell(cell => { cell.border = cellBorder; });
+    });
+
+    const rentTotalRow = wsSewaRuko.addRow({
+      no: 'Total',
+      amount: totalRentExpenses,
+    });
+    wsSewaRuko.mergeCells(`A${rentTotalRow.number}:D${rentTotalRow.number}`);
+    rentTotalRow.getCell('A').alignment = { horizontal: 'right', vertical: 'middle' };
+    rentTotalRow.eachCell(cell => {
+      cell.border = cellBorder;
+      cell.font = { bold: true };
+      cell.fill = subtotalFill;
+    });
+
+    // ============================================
+    // SHEET 9: Pemakaian Stok Barang
     // ============================================
     const wsPemakaian = wb.addWorksheet('Pemakaian Stok Barang', { views: [{ state: 'frozen', ySplit: 1 }] });
     wsPemakaian.columns = [
@@ -1494,10 +1634,11 @@ export default function Laporan() {
         <CardContent className="pt-0">
           <div className="overflow-x-auto">
             <div className="min-w-[720px] rounded-xl border border-border bg-background">
-              <div className="grid grid-cols-[1.4fr_1fr_1fr_1fr] bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <div className="grid grid-cols-[1.4fr_1fr_1fr_1fr_1fr] bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 <div className="border-b border-r border-border px-4 py-3">Keterangan</div>
                 <div className="border-b border-r border-border px-4 py-3 text-center">Cash</div>
                 <div className="border-b border-r border-border px-4 py-3 text-center">QRIS</div>
+                <div className="border-b border-r border-border px-4 py-3 text-center">Gojek</div>
                 <div className="border-b border-border px-4 py-3 text-center">Total</div>
               </div>
 
@@ -1514,7 +1655,7 @@ export default function Laporan() {
                     : 'font-medium';
 
                 return (
-                  <div key={row.label} className="grid grid-cols-[1.4fr_1fr_1fr_1fr] text-sm">
+                  <div key={row.label} className="grid grid-cols-[1.4fr_1fr_1fr_1fr_1fr] text-sm">
                     <div
                       className={cn(
                         'border-b border-r border-border px-4 py-3',
@@ -1529,6 +1670,9 @@ export default function Laporan() {
                     </div>
                     <div className={cn('border-b border-r border-border px-4 py-3 text-right tabular-nums', rowToneClass, rowWeightClass)}>
                       {row.qris}
+                    </div>
+                    <div className={cn('border-b border-r border-border px-4 py-3 text-right tabular-nums', rowToneClass, rowWeightClass)}>
+                      {row.gojek}
                     </div>
                     <div
                       className={cn(
@@ -1639,7 +1783,7 @@ export default function Laporan() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-3">
         <Card className="border-0 shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-1.5">
@@ -1653,6 +1797,39 @@ export default function Laporan() {
             ) : (
               <div className="space-y-2">
                 {recentExpenses.map(expense => (
+                  <div key={expense.id} className="flex items-center justify-between gap-3 border-b last:border-0 pb-2 last:pb-0">
+                    <div className="min-w-0">
+                      <p className="text-sm break-words">{expense.purpose}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        Tanggal kejadian {format(new Date(expense.date), 'dd MMM yyyy', { locale: localeId })}
+                      </p>
+                      {!isSameDay(new Date(expense.date), new Date(expense.createdAt)) && (
+                        <p className="text-[10px] text-muted-foreground">
+                          Diinput {format(new Date(expense.createdAt), 'dd MMM yyyy HH:mm', { locale: localeId })}
+                        </p>
+                      )}
+                    </div>
+                    <p className="text-xs font-bold shrink-0">{rp(expense.amount)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-0 shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-1.5">
+              <DollarSign className="w-4 h-4" />
+              Pengeluaran Gaji
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {recentSalaries.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-4 text-center">Belum ada pengeluaran gaji pada periode ini</p>
+            ) : (
+              <div className="space-y-2">
+                {recentSalaries.map(expense => (
                   <div key={expense.id} className="flex items-center justify-between gap-3 border-b last:border-0 pb-2 last:pb-0">
                     <div className="min-w-0">
                       <p className="text-sm break-words">{expense.purpose}</p>

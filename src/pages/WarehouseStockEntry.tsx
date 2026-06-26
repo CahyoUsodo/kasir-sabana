@@ -59,6 +59,7 @@ type EntryHistoryGroup = {
     warehouseItemName: string;
     quantity: number;
     unit: string;
+    buyPrice?: number;
   }>;
 };
 
@@ -137,6 +138,7 @@ export default function WarehouseStockEntryPage() {
         warehouseItemName: log.warehouseItemName,
         quantity: log.quantity,
         unit: log.unit,
+        buyPrice: log.buyPrice,
       });
     }
 
@@ -496,7 +498,7 @@ export default function WarehouseStockEntryPage() {
                     </div>
                   ) : null}
 
-                  <div className="grid gap-3 sm:grid-cols-[1fr_140px]">
+                  <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
                     <div className="space-y-1.5">
                       <Label className="text-xs font-semibold">Barang Gudang</Label>
                       <Popover open={openRowId === row.id} onOpenChange={open => setOpenRowId(open ? row.id : null)}>
@@ -640,11 +642,13 @@ export default function WarehouseStockEntryPage() {
 
                     <div className="space-y-2">
                       {group.items.map(item => (
-                        <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border bg-muted/10 px-3 py-2">
-                          <p className="text-xs font-medium break-words">{item.warehouseItemName}</p>
-                          <span className="text-xs font-bold shrink-0">
-                            +{item.quantity} {item.unit}
-                          </span>
+                        <div key={item.id} className="space-y-1 rounded-lg border bg-muted/10 px-3 py-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-xs font-medium break-words">{item.warehouseItemName}</p>
+                            <span className="text-xs font-bold shrink-0">
+                              +{item.quantity} {item.unit}
+                            </span>
+                          </div>
                         </div>
                       ))}
                     </div>

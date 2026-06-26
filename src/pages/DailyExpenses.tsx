@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { format, isSameDay } from 'date-fns';
 import { id as localeId } from 'date-fns/locale';
-import { DollarSign, PackageMinus, Trash2 } from 'lucide-react';
+import { DollarSign, PackageMinus, Trash2, ChevronLeft } from 'lucide-react';
 import { db, deleteDailyExpenseEntry, recordDailyExpense, recordWarehouseUsage, revertWarehouseUsageLog } from '@/lib/db';
 import { useAuth } from '@/hooks/use-auth';
+import { Link } from 'react-router-dom';
 import LockedPage from '@/components/LockedPage';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -37,7 +38,7 @@ export default function DailyExpensesPage() {
   const dailyPrepFormulas = useLiveQuery(() => db.dailyPrepFormulas.toArray());
 
   if (!can('manage_stock_inout')) {
-    return <LockedPage title="Pengeluaran Harian" permissionLabel="Kelola Transaksi & Stok" />;
+    return <LockedPage title="Pengeluaran Operasional Harian" permissionLabel="Kelola Transaksi & Stok" />;
   }
 
   const selectedExpenseHistoryStart = useMemo(() => {
@@ -77,6 +78,8 @@ export default function DailyExpensesPage() {
 
   const filteredDailyExpenses = useMemo(() => {
     return (dailyExpenses ?? []).filter(expense => {
+      const isOperational = !expense.type || expense.type === 'operational';
+      if (!isOperational) return false;
       const time = new Date(expense.date).getTime();
       return time >= selectedExpenseHistoryStart.getTime() && time <= selectedExpenseHistoryEnd.getTime();
     });
@@ -99,6 +102,7 @@ export default function DailyExpensesPage() {
         amount: parseFormattedNumber(expenseAmount),
         purpose: expensePurpose,
         date: expenseDate ? new Date(`${expenseDate}T12:00:00`) : undefined,
+        type: 'operational',
       });
       setExpenseAmount('');
       setExpensePurpose('');
@@ -148,13 +152,22 @@ export default function DailyExpensesPage() {
     }
   };
 
+  if (!can('manage_stock_inout')) {
+    return <LockedPage title="Pengeluaran Operasional Harian" permissionLabel="Kelola Transaksi & Stok" />;
+  }
+
   return (
     <div className="px-4 pt-6 pb-20 space-y-5">
-      <div>
-        <h1 className="text-xl font-bold">Pengeluaran Harian</h1>
-        <p className="text-xs text-muted-foreground mt-1">
-          Catat pengeluaran tak terduga cabang dan pemakaian stok manual agar operasional tetap rapi.
-        </p>
+      <div className="flex items-center gap-3">
+        <Link to="/settings" className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:bg-muted/80">
+          <ChevronLeft className="w-5 h-5" />
+        </Link>
+        <div>
+          <h1 className="text-xl font-bold">Pengeluaran Operasional Harian</h1>
+          <p className="text-xs text-muted-foreground mt-1">
+            Catat pengeluaran operasional harian cabang dan pemakaian stok manual agar operasional tetap rapi.
+          </p>
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -162,7 +175,7 @@ export default function DailyExpensesPage() {
           <CardHeader className="p-4 pb-3">
             <CardTitle className="text-sm flex items-center gap-1.5">
               <DollarSign className="w-4 h-4 text-primary" />
-              Pengeluaran Harian
+              Pengeluaran Operasional Harian
             </CardTitle>
             <CardDescription className="text-xs">
               Untuk catatan seperti beli bahan mendadak, parkir, gas, es batu, atau kebutuhan operasional lainnya.

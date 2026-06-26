@@ -888,7 +888,25 @@ export default function Pengaturan() {
           <Card className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
             <CardContent className="p-3 flex items-center gap-3">
               <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><DollarSign className="w-4 h-4" /></div>
-              <div className="flex-1"><p className="text-sm font-semibold">Pengeluaran Harian</p><p className="text-[10px] text-muted-foreground">Catat pengeluaran cabang & pemakaian stok manual</p></div>
+              <div className="flex-1"><p className="text-sm font-semibold">Pengeluaran Operasional Harian</p><p className="text-[10px] text-muted-foreground">Catat pengeluaran cabang & pemakaian stok manual</p></div>
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            </CardContent>
+          </Card>
+        </Link>
+        <Link to="/salary-expenses" className="block">
+          <Card className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
+            <CardContent className="p-3 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><DollarSign className="w-4 h-4" /></div>
+              <div className="flex-1"><p className="text-sm font-semibold">Pengeluaran Gaji</p><p className="text-[10px] text-muted-foreground">Catat pengeluaran gaji karyawan cabang</p></div>
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            </CardContent>
+          </Card>
+        </Link>
+        <Link to="/rent-expenses" className="block">
+          <Card className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
+            <CardContent className="p-3 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><DollarSign className="w-4 h-4" /></div>
+              <div className="flex-1"><p className="text-sm font-semibold">Pengeluaran Sewa Ruko</p><p className="text-[10px] text-muted-foreground">Catat pengeluaran sewa ruko cabang</p></div>
               <ChevronRight className="w-4 h-4 text-muted-foreground" />
             </CardContent>
           </Card>
@@ -1290,9 +1308,9 @@ export default function Pengaturan() {
             <div className="space-y-1.5"><Label>Nama</Label><Input value={pmName} onChange={e => setPmName(e.target.value)} placeholder="Contoh: Transfer BCA" className="h-11" /></div>
             <div className="space-y-1.5">
               <Label>Kategori</Label>
-              <div className="grid grid-cols-4 gap-2">
-                {['tunai', 'transfer', 'e-wallet', 'qris'].map(c => (
-                  <button key={c} onClick={() => setPmCategory(c)} className={`p-2 rounded-lg text-xs font-semibold border-2 capitalize transition-colors ${pmCategory === c ? 'border-primary bg-primary/5 text-primary' : 'border-muted text-muted-foreground'}`}>{c}</button>
+              <div className="grid grid-cols-5 gap-2">
+                {['tunai', 'transfer', 'e-wallet', 'qris', 'gojek'].map(c => (
+                  <button key={c} onClick={() => setPmCategory(c)} className={`p-2 rounded-lg text-[11px] font-semibold border-2 capitalize transition-colors ${pmCategory === c ? 'border-primary bg-primary/5 text-primary' : 'border-muted text-muted-foreground'}`}>{c}</button>
                 ))}
               </div>
             </div>

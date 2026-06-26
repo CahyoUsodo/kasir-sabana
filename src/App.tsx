@@ -59,6 +59,8 @@ const loadUsersPage = () => import("./pages/Users");
 const loadWarehousePage = () => import("./pages/Warehouse");
 const loadWarehouseStockEntryPage = () => import("./pages/WarehouseStockEntry");
 const loadDailyExpensesPage = () => import("./pages/DailyExpenses");
+const loadSalaryExpensesPage = () => import("./pages/SalaryExpenses");
+const loadRentExpensesPage = () => import("./pages/RentExpenses");
 const loadNotFound = () => import("./pages/NotFound");
 
 const Dashboard = lazyWithChunkRecovery(loadDashboard, "dashboard");
@@ -75,6 +77,8 @@ const UsersPage = lazyWithChunkRecovery(loadUsersPage, "users");
 const WarehousePage = lazyWithChunkRecovery(loadWarehousePage, "warehouse");
 const WarehouseStockEntryPage = lazyWithChunkRecovery(loadWarehouseStockEntryPage, "warehouse-stock-entry");
 const DailyExpensesPage = lazyWithChunkRecovery(loadDailyExpensesPage, "daily-expenses");
+const SalaryExpensesPage = lazyWithChunkRecovery(loadSalaryExpensesPage, "salary-expenses");
+const RentExpensesPage = lazyWithChunkRecovery(loadRentExpensesPage, "rent-expenses");
 const NotFound = lazyWithChunkRecovery(loadNotFound, "not-found");
 const PWA_UPDATE_TOAST_ID = "pwa-update-ready";
 
@@ -196,6 +200,7 @@ const App = () => {
         loadWarehousePage(),
         loadWarehouseStockEntryPage(),
         loadDailyExpensesPage(),
+        loadSalaryExpensesPage(),
         loadSettings(),
       ]);
     };
@@ -242,6 +247,8 @@ const App = () => {
                   <Route path="/warehouse" element={<WarehousePage />} />
                   <Route path="/warehouse/stock-entry" element={<WarehouseStockEntryPage />} />
                   <Route path="/daily-expenses" element={<DailyExpensesPage />} />
+                  <Route path="/salary-expenses" element={<SalaryExpensesPage />} />
+                  <Route path="/rent-expenses" element={<RentExpensesPage />} />
                 </Route>
                 <Route path="*" element={<NotFound />} />
               </Routes>

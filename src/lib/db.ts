@@ -115,7 +115,7 @@ export interface HppHistory {
 export interface PaymentMethod {
   id?: number;
   name: string;
-  category: string; // tunai, transfer, e-wallet, qris
+  category: string; // tunai, transfer, e-wallet, qris, gojek
   isDefault: boolean;
   createdAt: Date;
 }
@@ -273,6 +273,7 @@ export interface DailyExpense {
   notes?: string;
   date: Date;
   createdAt: Date;
+  type?: 'operational' | 'salary';
 }
 
 export interface WarehouseUsageLog {
@@ -298,6 +299,7 @@ export interface WarehouseStockEntryLog {
   date: Date;
   createdAt: Date;
   createdBy?: number;
+  buyPrice?: number;
 }
 
 export function getActiveDailyPrepFormulas(
@@ -803,6 +805,30 @@ class PosDatabase extends Dexie {
       warehouseUsageLogs: '++id, warehouseItemId, date, createdAt',
       warehouseStockEntryLogs: '++id, entryGroupId, warehouseItemId, date, createdAt, createdBy',
     });
+
+    this.version(16).stores({
+      categories:       '++id, name, isDeleted',
+      products:         '++id, name, &sku, categoryId, barcode, isDeleted, createdBy, updatedBy',
+      suppliers:        '++id, name, isDeleted',
+      stockIns:         '++id, productId, supplierId, date, createdBy',
+      stockOuts:        '++id, productId, date, createdBy',
+      hppHistory:       '++id, productId, date',
+      paymentMethods:   '++id, name, category',
+      transactions:     '++id, date, &receiptNumber, paymentMethodId, status, orderNumber, createdBy',
+      transactionItems: '++id, transactionId, productId, stockKey',
+      storeSettings:    '++id',
+      units:            '++id, &name, isDeleted',
+      users:            '++id, &username, role, isActive',
+      warehouseItems:   '++id, name, isDeleted, isCashierVisible, isDailyReset',
+      productRecipes:   '++id, productId, warehouseItemId, [productId+warehouseItemId]',
+      dailyPrepFormulas: '++id, prepItemId, targetItemId, [prepItemId+targetItemId]',
+      productOptionGroups: '++id, productId, isDeleted, [productId+sortOrder]',
+      productOptions: '++id, groupId, isDeleted, [groupId+sortOrder]',
+      productOptionRecipes: '++id, optionId, warehouseItemId, [optionId+warehouseItemId]',
+      dailyExpenses: '++id, date, createdAt',
+      warehouseUsageLogs: '++id, warehouseItemId, date, createdAt',
+      warehouseStockEntryLogs: '++id, entryGroupId, warehouseItemId, date, createdAt, createdBy',
+    });
   }
 }
 
@@ -841,6 +867,7 @@ export async function recordDailyExpense(input: {
   purpose: string;
   notes?: string;
   date?: Date;
+  type?: 'operational' | 'salary';
 }) {
   const amount = Number(input.amount) || 0;
   const purpose = input.purpose.trim();
@@ -860,6 +887,7 @@ export async function recordDailyExpense(input: {
     notes: input.notes?.trim(),
     date: input.date || now,
     createdAt: now,
+    type: input.type || 'operational',
   });
 }
 
@@ -933,6 +961,7 @@ export async function recordWarehouseStockEntry(input: {
   items: Array<{
     warehouseItemId: number;
     quantity: number;
+    buyPrice?: number;
   }>;
   note?: string;
   date?: Date;
@@ -943,6 +972,7 @@ export async function recordWarehouseStockEntry(input: {
     .map(item => ({
       warehouseItemId: Number(item.warehouseItemId),
       quantity: Number(item.quantity) || 0,
+      buyPrice: Number(item.buyPrice) || 0,
     }))
     .filter(item => item.warehouseItemId > 0 && item.quantity > 0);
 
@@ -950,9 +980,20 @@ export async function recordWarehouseStockEntry(input: {
     throw new Error('Minimal satu barang dengan jumlah lebih dari 0 wajib diisi');
   }
 
-  const groupedItems = new Map<number, number>();
+  const groupedItems = new Map<number, { quantity: number; buyPrice: number }>();
   for (const item of normalizedItems) {
-    groupedItems.set(item.warehouseItemId, (groupedItems.get(item.warehouseItemId) || 0) + item.quantity);
+    const existing = groupedItems.get(item.warehouseItemId);
+    if (existing) {
+      groupedItems.set(item.warehouseItemId, {
+        quantity: existing.quantity + item.quantity,
+        buyPrice: item.buyPrice || existing.buyPrice,
+      });
+    } else {
+      groupedItems.set(item.warehouseItemId, {
+        quantity: item.quantity,
+        buyPrice: item.buyPrice,
+      });
+    }
   }
 
   const note = input.note?.trim();
@@ -964,14 +1005,14 @@ export async function recordWarehouseStockEntry(input: {
   return db.transaction('rw', [db.warehouseItems, db.warehouseStockEntryLogs], async () => {
     const logPayload: WarehouseStockEntryLog[] = [];
 
-    for (const [warehouseItemId, quantity] of groupedItems.entries()) {
+    for (const [warehouseItemId, data] of groupedItems.entries()) {
       const item = await db.warehouseItems.get(warehouseItemId);
       if (!item || item.isDeleted === 1) {
         throw new Error('Salah satu barang gudang tidak ditemukan');
       }
 
       await db.warehouseItems.update(item.id!, {
-        stock: item.stock + quantity,
+        stock: item.stock + data.quantity,
         updatedAt: createdAt,
       });
 
@@ -979,13 +1020,14 @@ export async function recordWarehouseStockEntry(input: {
         entryGroupId,
         warehouseItemId: item.id!,
         warehouseItemName: item.name,
-        quantity,
+        quantity: data.quantity,
         unit: item.unit,
         source,
         note,
         date,
         createdAt,
         createdBy: input.createdBy,
+        buyPrice: data.buyPrice,
       });
     }
 
