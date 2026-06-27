@@ -5,7 +5,7 @@ import { Settings, Store, CreditCard, Tag, Download, Upload, Plus, Trash2, Edit2
 import ThemeColorPicker from '@/components/ThemeColorPicker';
 import { setThemeColor } from '@/hooks/use-theme-color';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -27,6 +27,7 @@ import { usePWAInstall } from '@/hooks/use-pwa-install';
 import { generateUUID } from '@/lib/utils';
 
 export default function Pengaturan() {
+  const navigate = useNavigate();
   const buildInfoText = `v${APP_VERSION} • build ${APP_COMMIT_HASH}`;
   const buildTimeText = formatAppBuildTime();
 
@@ -893,24 +894,38 @@ export default function Pengaturan() {
             </CardContent>
           </Card>
         </Link>
-        <Link to="/salary-expenses" className="block">
-          <Card className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
+        <div 
+          onClick={() => runWithPinGate(
+            () => navigate('/salary-expenses'),
+            'Verifikasi Akses Pengeluaran Gaji',
+            'Masukkan PIN keamanan 6 angka untuk mengakses halaman pengeluaran gaji.'
+          )} 
+          className="block cursor-pointer"
+        >
+          <Card className="border-0 shadow-sm hover:shadow-md transition-shadow">
             <CardContent className="p-3 flex items-center gap-3">
               <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><DollarSign className="w-4 h-4" /></div>
               <div className="flex-1"><p className="text-sm font-semibold">Pengeluaran Gaji</p><p className="text-[10px] text-muted-foreground">Catat pengeluaran gaji karyawan cabang</p></div>
               <ChevronRight className="w-4 h-4 text-muted-foreground" />
             </CardContent>
           </Card>
-        </Link>
-        <Link to="/rent-expenses" className="block">
-          <Card className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
+        </div>
+        <div 
+          onClick={() => runWithPinGate(
+            () => navigate('/rent-expenses'),
+            'Verifikasi Akses Pengeluaran Sewa Ruko',
+            'Masukkan PIN keamanan 6 angka untuk mengakses halaman pengeluaran sewa ruko.'
+          )} 
+          className="block cursor-pointer"
+        >
+          <Card className="border-0 shadow-sm hover:shadow-md transition-shadow">
             <CardContent className="p-3 flex items-center gap-3">
               <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><DollarSign className="w-4 h-4" /></div>
               <div className="flex-1"><p className="text-sm font-semibold">Pengeluaran Sewa Ruko</p><p className="text-[10px] text-muted-foreground">Catat pengeluaran sewa ruko cabang</p></div>
               <ChevronRight className="w-4 h-4 text-muted-foreground" />
             </CardContent>
           </Card>
-        </Link>
+        </div>
         {can('manage_store_settings') && (
           <Card 
             className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow"

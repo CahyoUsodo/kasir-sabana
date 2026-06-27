@@ -1783,7 +1783,7 @@ export default function Laporan() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-2">
         <Card className="border-0 shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-1.5">
@@ -1797,39 +1797,6 @@ export default function Laporan() {
             ) : (
               <div className="space-y-2">
                 {recentExpenses.map(expense => (
-                  <div key={expense.id} className="flex items-center justify-between gap-3 border-b last:border-0 pb-2 last:pb-0">
-                    <div className="min-w-0">
-                      <p className="text-sm break-words">{expense.purpose}</p>
-                      <p className="text-[10px] text-muted-foreground">
-                        Tanggal kejadian {format(new Date(expense.date), 'dd MMM yyyy', { locale: localeId })}
-                      </p>
-                      {!isSameDay(new Date(expense.date), new Date(expense.createdAt)) && (
-                        <p className="text-[10px] text-muted-foreground">
-                          Diinput {format(new Date(expense.createdAt), 'dd MMM yyyy HH:mm', { locale: localeId })}
-                        </p>
-                      )}
-                    </div>
-                    <p className="text-xs font-bold shrink-0">{rp(expense.amount)}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="border-0 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-1.5">
-              <DollarSign className="w-4 h-4" />
-              Pengeluaran Gaji
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {recentSalaries.length === 0 ? (
-              <p className="text-xs text-muted-foreground py-4 text-center">Belum ada pengeluaran gaji pada periode ini</p>
-            ) : (
-              <div className="space-y-2">
-                {recentSalaries.map(expense => (
                   <div key={expense.id} className="flex items-center justify-between gap-3 border-b last:border-0 pb-2 last:pb-0">
                     <div className="min-w-0">
                       <p className="text-sm break-words">{expense.purpose}</p>
