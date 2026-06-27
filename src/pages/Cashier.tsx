@@ -1163,6 +1163,7 @@ export default function Kasir() {
 
       await db.transactions.update(editingTxId, {
         status: 'completed',
+        ...(originalTx?.status === 'open' ? { date: new Date() } : {}),
         subtotal,
         discountType: txDiscountType,
         discountValue: Number(txDiscountValue) || 0,
